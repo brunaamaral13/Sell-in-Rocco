@@ -2436,20 +2436,12 @@ function placeTip(x, y, html) {
   tip.style.top = Math.max(8, top) + "px";
 }
 
-async function boot() {
+function boot() {
   bind();
   if (document.fonts && document.fonts.ready) {
     document.fonts.ready.then(() => { if (state.meta) paintAll(charts.p || 1); });
   }
-  showLoading("Procurando a base na pasta…");
-  try {
-    const response = await fetch(encodeURI("Faturamento sell-in acumulado.csv"), { cache: "no-store" });
-    if (!response.ok) throw new Error("sem arquivo");
-    ingest(await response.arrayBuffer(), "Faturamento sell-in acumulado.csv");
-  } catch (error) {
-    hideLoading();
-    if (!state.clients.length) showEmpty(error && error.message && !/sem arquivo|Failed|NetworkError|fetch/i.test(error.message) ? error.message : "");
-  }
+  showEmpty();
 }
 
 boot();
