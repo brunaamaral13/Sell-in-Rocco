@@ -45,7 +45,7 @@ const state = {
   clientId: null,
   donutDim: "tipo",
   view: "mensal",
-  ufSort: "down",
+  ufSort: "desc",
   search: "",
   searchPick: null,
   hideZeros: true,
@@ -66,7 +66,7 @@ const charts = {
   ufTo: null,
   ufSig: "",
   ufHot: [],
-  rankHot: [],
+  rankHot: {},
   donutFrom: null,
   donutTo: null,
   donutSig: "",
@@ -475,12 +475,20 @@ function inClient(client) {
   return !set.size || set.has(client.id);
 }
 
+function matchingSearchIds() {
+  const query = state.search.trim();
+  if (!query) return null;
+  if (state.searchPick) return new Set([state.searchPick]);
+  return new Set(codeHits(query).map((client) => client.id));
+}
+
 function population(opts) {
   const win = opts.win;
   const except = opts.except || null;
   const useCohort = opts.cohort !== false;
   const useFocus = !!opts.focus;
-  let list = state.clients.filter((client) => inDim(client, except) && inClient(client));
+  const ids = matchingSearchIds();
+  let list = state.clients.filter((client) => inDim(client, except) && inClient(client) && (!ids || ids.has(client.id)));
   if (useCohort && state.cohort) list = list.filter((client) => matchCohort(client, win, state.cohort));
   if (useFocus && state.clientId) {
     const one = list.find((client) => client.id === state.clientId);
@@ -1139,7 +1147,7 @@ function updateCharts(listForTrend, listForDonut, win) {
     charts.donutSig = donutSig;
     changed = true;
   }
-  const uf = buildUfModel(population({ win, focus: true, except: "uf" }), win);
+  const uf = buildUfModel(population({ win, focus: true }), win);
   const ufSig = state.view + "|" + uf.categories.map((category) => category.label).join(",")
     + "|" + uf.rows.map((row) => row.key + ":" + row.values.map((value) => Math.round(value || 0)).join(",")).join("|");
   if (ufSig !== charts.ufSig) {
@@ -1214,30 +1222,30 @@ function renderUfList(model, win) {
   document.querySelectorAll("#ufSort button").forEach((button) => {
     button.setAttribute("aria-pressed", button.dataset.ufSort === state.ufSort ? "true" : "false");
   });
-  $("ufRankTitle").textContent = state.ufSort === "up" ? "Quem cresceu" : "Quem caiu";
   paintBrazilMap(model);
   paintUfRank();
 }
 
-function ufRankRows(model) {
+function ufRankRows(model, growing) {
   if (!model) return [];
-  const growing = state.ufSort === "up";
+  const majorFirst = state.ufSort !== "asc";
   return model.rows
     .filter((row) => row.pct != null && (growing ? row.pct > 0.05 : row.pct < -0.05))
-    .sort((a, b) => growing ? b.pct - a.pct : a.pct - b.pct);
+    .sort((a, b) => {
+      const delta = growing ? b.pct - a.pct : a.pct - b.pct;
+      return majorFirst ? delta : -delta;
+    });
 }
 
-function paintUfRank() {
-  const canvas = $("ufRank");
+function paintUfRankCanvas(canvas, growing) {
   if (!canvas || !charts.ufTo) return;
-  const growing = state.ufSort === "up";
-  const rows = ufRankRows(charts.ufTo);
+  const rows = ufRankRows(charts.ufTo, growing);
   const rowH = 32;
   const plot = canvas.parentElement;
   const height = Math.max(72, rows.length ? rows.length * rowH + 8 : 72);
-  if (plot.clientHeight !== height) plot.style.height = height + "px";
+  if (Math.abs(plot.clientHeight - height) > 1) plot.style.height = height + "px";
   const surface = prep(canvas);
-  charts.rankHot = [];
+  charts.rankHot[canvas.id] = [];
   if (!surface) return;
   const { ctx, w, h } = surface;
   if (!rows.length) {
@@ -1256,17 +1264,17 @@ function paintUfRank() {
   const x1 = w - pctW;
   const spanOf = (pct) => Math.sqrt(Math.abs(pct));
   const max = Math.max(...rows.map((row) => spanOf(row.pct)), 1);
-  ctx.font = "13px Outfit, Segoe UI, sans-serif";
+  const color = growing ? "#0f7a5a" : "#8e1214";
   ctx.textBaseline = "middle";
   rows.forEach((row, index) => {
     const y = 4 + index * rowH;
     const faded = picked.size && !picked.has(row.key);
     const hot = hotKey === row.key;
     if (hot || picked.has(row.key)) {
-      ctx.fillStyle = hot ? "rgba(27,42,74,0.05)" : "rgba(210,60,72,0.06)";
+      ctx.fillStyle = hot ? "rgba(27,42,74,0.05)" : (growing ? "rgba(15,122,90,0.08)" : "rgba(142,18,20,0.08)");
       ctx.fillRect(0, y, w, rowH);
     }
-    charts.rankHot.push({ x: 0, y, w, h: rowH, key: row.key });
+    charts.rankHot[canvas.id].push({ x: 0, y, w, h: rowH, key: row.key });
     ctx.globalAlpha = faded ? 0.35 : 1;
     ctx.fillStyle = "#1b2a4a";
     ctx.textAlign = "left";
@@ -1275,16 +1283,19 @@ function paintUfRank() {
     const span = Math.max(8, x1 - x0);
     const bw = Math.max(4, (spanOf(row.pct) / max) * span);
     const by = y + (rowH - 14) / 2;
-    ctx.fillStyle = growing ? "#0f7a5a" : "#8e1214";
+    ctx.fillStyle = color;
     ctx.beginPath();
     ctx.roundRect(x0, by, bw, 14, 4);
     ctx.fill();
-    ctx.fillStyle = growing ? "#0f7a5a" : "#8e1214";
     ctx.textAlign = "right";
-    ctx.font = "650 13px Outfit, Segoe UI, sans-serif";
     ctx.fillText(formatPct(row.pct), w - 8, y + rowH / 2);
     ctx.globalAlpha = 1;
   });
+}
+
+function paintUfRank() {
+  paintUfRankCanvas($("ufRankDown"), false);
+  paintUfRankCanvas($("ufRankUp"), true);
 }
 
 function renderKpis(win, list) {
@@ -1343,7 +1354,7 @@ function renderKpis(win, list) {
 }
 
 function renderInsights(win) {
-  const base = state.clients.filter((client) => inDim(client));
+  const base = population({ win, focus: true, cohort: false });
   const counts = { up: 0, down: 0, low: 0, idle: 0, new: 0, stuck: 0, replenish: 0 };
   for (const client of base) {
     const met = metrics(client, win.year, win.m0, win.m1);
@@ -1356,11 +1367,12 @@ function renderInsights(win) {
     if (isReplenish(client, met)) counts.replenish++;
   }
   for (const key of Object.keys(counts)) {
-    tween($("n-" + key), counts[key], (value) => Math.round(value).toLocaleString("pt-BR"));
+    const counter = $("n-" + key);
+    if (counter) tween(counter, counts[key], (value) => Math.round(value).toLocaleString("pt-BR"));
     const card = document.querySelector(`.insight[data-cohort="${key}"]`);
-    card.setAttribute("aria-pressed", state.cohort === key ? "true" : "false");
+    if (card) card.setAttribute("aria-pressed", state.cohort === key ? "true" : "false");
     const tab = document.querySelector(`#alertTabs [data-tab="${key}"]`);
-    tab.setAttribute("aria-pressed", state.listTab === key ? "true" : "false");
+    if (tab) tab.setAttribute("aria-pressed", state.listTab === key ? "true" : "false");
   }
   return base;
 }
@@ -1391,12 +1403,12 @@ function renderAlerts(win, base) {
     else if (state.listTab === "low") pill = `<span class="pill low">${formatCompact(row.met.avg)}/mês</span>`;
     else if (state.listTab === "new") pill = `<span class="pill new">desde ${esc(row.client.firstLabel)}</span>`;
     else if (state.listTab === "stuck") pill = `<span class="pill stuck">${formatBooks(client.saldo)}</span>`;
-    else if (state.listTab === "replenish") pill = `<span class="pill replenish">${client.saldo > 0.5 ? formatBooks(client.saldo) : "sem saldo"}</span>`;
+    else if (state.listTab === "replenish") pill = `<span class="pill replenish">${client.saldo > 0.5 ? formatConsigned(client.saldo) : "sem livros consignados"}</span>`;
     else if (client.saldo > 0.5) pill = `<span class="pill idle-alert" title="Sem faturar e ainda com livros consignados">${ALERT_ICON}${row.client.idleGap} meses · ${formatConsigned(client.saldo)}</span>`;
     else pill = `<span class="pill idle">${row.client.idleGap} meses · ${formatConsigned(0)}</span>`;
     const stockBit = state.listTab === "stuck" || state.listTab === "replenish" || state.listTab === "idle"
       ? ""
-      : (client.saldo > 0.5 ? ` · ${formatBooks(client.saldo)}` : "");
+      : (client.saldo > 0.5 ? ` · ${formatConsigned(client.saldo)}` : "");
     return `<button type="button" class="alert-row${state.clientId === client.id ? " is-focus" : ""}" data-id="${esc(client.id)}" style="animation-delay:${Math.min(index, 12) * 25}ms">
       <span class="who"><strong>${esc(client.nome)}</strong><small>${esc(client.vendedor)} · ${esc(client.uf)} · ${esc(client.tipo)}${stockBit}</small></span>
       ${pill}
@@ -1419,7 +1431,7 @@ function codeHits(query) {
   const digits = String(query || "").replace(/\D/g, "");
   const compact = String(query || "").replace(/\s/g, "");
   if (digits.length < 2 || digits.length !== compact.length || !state.clients) return [];
-  const hits = state.clients.filter((client) => String(client.cod || "").replace(/\D/g, "").includes(digits));
+  const hits = state.clients.filter((client) => inDim(client) && String(client.cod || "").replace(/\D/g, "").includes(digits));
   hits.sort((a, b) => {
     const rank = (client) => {
       const cod = String(client.cod || "").replace(/\D/g, "");
@@ -1463,22 +1475,11 @@ function renderSearchHit() {
 }
 
 function renderRanking(win) {
-  const list = state.searchPick
-    ? state.clients.filter((client) => client.id === state.searchPick)
-    : population({ win, focus: false });
-  const q = norm(state.search);
-  const qDigits = q.replace(/\D/g, "");
+  const list = population({ win, focus: false });
   let rows = list.map((client) => {
     const met = metrics(client, win.year, win.m0, win.m1);
     return { client, met, low: isLow(met) };
   });
-  if (q) {
-    rows = rows.filter((row) => {
-      const client = row.client;
-      if (norm(client.nome).includes(q) || norm(client.id).includes(q) || norm(client.vendedor).includes(q)) return true;
-      return qDigits.length >= 3 && client.cnpj.replace(/\D/g, "").includes(qDigits);
-    });
-  }
   const books = rows.reduce((sum, row) => sum + row.client.saldo, 0);
   if (!state.searchPick && state.cohort !== "idle" && state.cohort !== "new" && state.cohort !== "stuck" && state.hideZeros) {
     rows = rows.filter((row) => row.met.cur > 0.5 || row.met.prev > 0.5 || (state.cohort === "low" && row.low));
@@ -1498,7 +1499,7 @@ function renderRanking(win) {
   const focusName = state.clientId ? (state.clients.find((client) => client.id === state.clientId) || {}).nome : "";
   const vend = state.filters.vendedor;
   $("rankTitle").textContent = vend.size === 1 ? "Ranking · " + [...vend][0] : "Ranking de clientes";
-  $("rankCount").textContent = rows.length.toLocaleString("pt-BR") + " clientes · " + formatBooks(books)
+  $("rankCount").textContent = rows.length.toLocaleString("pt-BR") + " clientes · " + formatConsigned(books)
     + " · " + rangeLabel(win.m0, win.m1) + "/" + win.year;
   document.querySelectorAll("[data-sort]").forEach((button) => {
     const on = button.dataset.sort === state.rankSort.key;
@@ -1596,7 +1597,7 @@ function renderDrawer(win) {
       <p>${prev}: ${formatFull(met.prev)} · ${formatPct(met.pct)}</p>
     </div>
     <div class="stock-callout stock-quiet${stockClass}">
-      <span>Saldo consignado · ${formatBooks(client.saldo)}</span>
+      <span>${formatConsigned(client.saldo)}</span>
       <p>${stockNote}</p>
     </div>
     <div class="badges">${badges.join("") || `<span class="pill">estável</span>`}</div>
@@ -1685,7 +1686,7 @@ function renderAll() {
   const win = windowOf();
   const kpiList = population({ win, focus: true });
   const trendList = population({ win, focus: true });
-  const donutList = population({ win, focus: false, except: state.donutDim });
+  const donutList = population({ win, focus: false });
   const base = renderInsights(win);
   renderKpis(win, kpiList);
   renderAlerts(win, base);
@@ -1707,9 +1708,8 @@ function renderAll() {
 let clientMenuSig = "";
 
 function portfolioClients() {
-  const sellers = state.filters.vendedor;
   return state.clients
-    .filter((client) => !sellers.size || sellers.has(client.vendedor))
+    .filter((client) => inDim(client))
     .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
 }
 
@@ -1720,18 +1720,17 @@ function clientOptionsHtml(clients) {
 }
 
 function pruneClientFilter() {
-  const sellers = state.filters.vendedor;
-  if (!sellers.size || !state.filters.cliente.size) return;
+  if (!state.filters.cliente.size) return;
   for (const id of [...state.filters.cliente]) {
     const client = state.clients.find((item) => item.id === id);
-    if (!client || !sellers.has(client.vendedor)) state.filters.cliente.delete(id);
+    if (!client || !inDim(client)) state.filters.cliente.delete(id);
   }
 }
 
 function syncClientMenu() {
   const menu = document.querySelector(".menu-client");
   if (!menu) return;
-  const sig = [...state.filters.vendedor].sort().join("|");
+  const sig = DIMS.map((dim) => dim.key + ":" + [...state.filters[dim.key]].sort().join(",")).join("|");
   if (sig === clientMenuSig) return;
   clientMenuSig = sig;
   const list = menu.querySelector(".menu-list");
@@ -1813,7 +1812,7 @@ function resetViewState() {
   state.searchPick = null;
   state.analysisYear = state.meta.maxYear;
   state.rankSort = { key: "revenue", dir: "desc" };
-  state.ufSort = "down";
+  state.ufSort = "desc";
   state.openMenu = null;
   $("q").value = "";
   charts.colorOf = new Map();
@@ -2210,33 +2209,34 @@ function bind() {
     state.ufSort = button.dataset.ufSort;
     renderUfList(charts.ufTo, windowOf());
   });
-  const ufRank = $("ufRank");
-  function rankHit(event) {
-    return charts.rankHot.find((spot) => event.offsetX >= spot.x && event.offsetX <= spot.x + spot.w && event.offsetY >= spot.y && event.offsetY <= spot.y + spot.h);
+  function bindRank(canvas) {
+    const rankHit = (event) => (charts.rankHot[canvas.id] || []).find((spot) => event.offsetX >= spot.x && event.offsetX <= spot.x + spot.w && event.offsetY >= spot.y && event.offsetY <= spot.y + spot.h);
+    canvas.addEventListener("pointermove", (event) => {
+      const hit = rankHit(event);
+      charts.hover = hit ? { chart: "ufmap", key: hit.key } : null;
+      canvas.style.cursor = hit ? "pointer" : "default";
+      paintUfRank();
+      paintBrazilMap(charts.ufTo);
+      if (!hit || !charts.ufTo) { hideTip("ufrank"); return; }
+      const row = charts.ufTo.rows.find((item) => item.key === hit.key);
+      if (!row) { hideTip("ufrank"); return; }
+      const people = row.clients.toLocaleString("pt-BR") + (row.clients === 1 ? " cliente" : " clientes");
+      const fresh = row.novos.toLocaleString("pt-BR") + (row.novos === 1 ? " novo" : " novos");
+      showTip(event.clientX, event.clientY, `<b>${esc(row.key)} · ${formatPct(row.pct)}</b><div>${people}</div><div>${fresh}</div><div>${formatCompact(row.cur)}</div>`, "ufrank");
+    });
+    canvas.addEventListener("pointerleave", () => {
+      charts.hover = null;
+      hideTip("ufrank");
+      paintUfRank();
+      paintBrazilMap(charts.ufTo);
+    });
+    canvas.addEventListener("click", (event) => {
+      const hit = rankHit(event);
+      if (hit) toggleUf(hit.key);
+    });
   }
-  ufRank.addEventListener("pointermove", (event) => {
-    const hit = rankHit(event);
-    charts.hover = hit ? { chart: "ufmap", key: hit.key } : null;
-    ufRank.style.cursor = hit ? "pointer" : "default";
-    paintUfRank();
-    paintBrazilMap(charts.ufTo);
-    if (!hit || !charts.ufTo) { hideTip("ufrank"); return; }
-    const row = charts.ufTo.rows.find((item) => item.key === hit.key);
-    if (!row) { hideTip("ufrank"); return; }
-    const people = row.clients.toLocaleString("pt-BR") + (row.clients === 1 ? " cliente" : " clientes");
-    const fresh = row.novos.toLocaleString("pt-BR") + (row.novos === 1 ? " novo" : " novos");
-    showTip(event.clientX, event.clientY, `<b>${esc(row.key)} · ${formatPct(row.pct)}</b><div>${people}</div><div>${fresh}</div><div>${formatCompact(row.cur)}</div>`, "ufrank");
-  });
-  ufRank.addEventListener("pointerleave", () => {
-    charts.hover = null;
-    hideTip("ufrank");
-    paintUfRank();
-    paintBrazilMap(charts.ufTo);
-  });
-  ufRank.addEventListener("click", (event) => {
-    const hit = rankHit(event);
-    if (hit) toggleUf(hit.key);
-  });
+  bindRank($("ufRankDown"));
+  bindRank($("ufRankUp"));
   $("brazilSvg").addEventListener("click", (event) => {
     const path = event.target.closest("path[data-uf]");
     if (!path) return;
@@ -2327,7 +2327,8 @@ function bind() {
     new ResizeObserver(resize).observe($("trend").parentElement);
     new ResizeObserver(resize).observe($("donut").parentElement);
     new ResizeObserver(resize).observe($("ufTrend").parentElement);
-    new ResizeObserver(resize).observe($("ufRank").parentElement);
+    new ResizeObserver(resize).observe($("ufRankDown").parentElement);
+    new ResizeObserver(resize).observe($("ufRankUp").parentElement);
   }
 }
 

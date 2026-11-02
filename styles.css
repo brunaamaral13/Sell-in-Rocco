@@ -420,6 +420,8 @@ body.is-drag .drop { border-color: var(--red); transform: translateY(-2px); }
 .uf-rank { margin-top: 8px; }
 .uf-rank-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
 .uf-rank-head p { margin: 0; font-size: 13px; font-weight: 650; }
+.uf-rank-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 28px; align-items: start; }
+.uf-rank-label { margin: 0 0 4px; font-size: 13px; font-weight: 650; }
 .uf-rank-plot { position: relative; height: 280px; }
 .uf-rank-plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
 .brazil-wrap { min-width: 0; display: grid; grid-template-columns: 1fr; align-items: start; gap: 8px; }
@@ -717,6 +719,7 @@ body.is-drag .drop { border-color: var(--red); transform: translateY(-2px); }
   .plot-wrap, .uf-layout .plot-wrap { height: 280px; min-height: 0; flex: none; }
   .uf-layout { grid-template-columns: 1fr; }
   .brazil-wrap svg { max-height: 420px; }
+  .uf-rank-grid { grid-template-columns: 1fr; }
   .donut-layout { grid-template-columns: 1fr; }
   .col-vend { display: none; }
 }
