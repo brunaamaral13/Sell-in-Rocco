@@ -28,6 +28,7 @@ const NEW_YEAR = 2026;
 const STOCK_STUCK = 200;
 const STOCK_LOW = 100;
 const CONSIGN_TYPES = new Set(["LIVRARIA", "DISTRIBUIDOR", "HUDSON"]);
+const PINNED_REDES = ["VILA", "TRAVESSA", "CURITIBA", "VANGUARDA"];
 const SLICE_COLORS = ["#b5191a","#e0a106","#0f7a5a","#1b2a4a","#7c4d9e","#d46a2e","#3d7ea6","#5b8c5a","#b08968","#8d3b4c","#4c6e8a","#c47b9b","#3f6f8f","#a33b4a"];
 const ALERT_ICON = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.5 2.8 20h18.4L12 3.5z"/><path d="M12 10v4.2"/><path d="M12 16.8v.6"/></svg>`;
 
@@ -35,7 +36,7 @@ const state = {
   clients: [],
   meta: null,
   fileName: "",
-  filters: { vendedor: new Set(), rede: new Set(), tipo: new Set(), uf: new Set() },
+  filters: { vendedor: new Set(), rede: new Set(), tipo: new Set(), uf: new Set(), cliente: new Set() },
   cohort: null,
   listTab: "up",
   period: null,
@@ -44,6 +45,7 @@ const state = {
   clientId: null,
   donutDim: "tipo",
   view: "mensal",
+  ufSort: "down",
   search: "",
   searchPick: null,
   hideZeros: true,
@@ -60,6 +62,11 @@ const charts = {
   trendFrom: null,
   trendTo: null,
   trendSig: "",
+  ufFrom: null,
+  ufTo: null,
+  ufSig: "",
+  ufHot: [],
+  rankHot: [],
   donutFrom: null,
   donutTo: null,
   donutSig: "",
@@ -375,6 +382,10 @@ function formatPct(n) {
   const sign = n > 0 ? "+" : "";
   return sign + n.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 }) + "%";
 }
+function quarterMonths(q) {
+  const cap = (name) => name.charAt(0).toUpperCase() + name.slice(1);
+  return cap(MONTHS_SHORT[q * 3]) + " a " + cap(MONTHS_SHORT[q * 3 + 2]);
+}
 function rangeLabel(m0, m1) {
   if (m0 === m1) return MONTHS[m0];
   if (m0 === 0 && m1 === 11) return "ano fechado";
@@ -459,13 +470,17 @@ function inDim(client, except) {
   }
   return true;
 }
+function inClient(client) {
+  const set = state.filters.cliente;
+  return !set.size || set.has(client.id);
+}
 
 function population(opts) {
   const win = opts.win;
   const except = opts.except || null;
   const useCohort = opts.cohort !== false;
   const useFocus = !!opts.focus;
-  let list = state.clients.filter((client) => inDim(client, except));
+  let list = state.clients.filter((client) => inDim(client, except) && inClient(client));
   if (useCohort && state.cohort) list = list.filter((client) => matchCohort(client, win, state.cohort));
   if (useFocus && state.clientId) {
     const one = list.find((client) => client.id === state.clientId);
@@ -476,7 +491,7 @@ function population(opts) {
 
 function hasActiveFilters() {
   if (state.period || state.cohort || state.clientId || state.search.trim()) return true;
-  return DIMS.some((dim) => state.filters[dim.key].size);
+  return DIMS.some((dim) => state.filters[dim.key].size) || state.filters.cliente.size > 0;
 }
 
 function niceMax(value) {
@@ -556,7 +571,7 @@ function buildTrendModel(list, win) {
 
   if (state.view === "trimestral") {
     const categories = [0, 1, 2, 3].map((q) => ({
-      label: "T" + (q + 1),
+      label: quarterMonths(q),
       allow: q * 3 <= anchor,
       muted: q * 3 > anchor,
       quarter: q
@@ -612,6 +627,101 @@ function buildTrendModel(list, win) {
   };
 }
 
+function ufSeries(clients, year, categories) {
+  if (state.view === "anual") {
+    const m1 = categories._m1;
+    return categories.map((category) => {
+      let total = 0;
+      for (const client of clients) total += metrics(client, category.year, 0, m1).cur;
+      return total;
+    });
+  }
+  const arr = sumSeries(clients, year, 12);
+  const last = state.meta.lastMonth[year];
+  if (state.view === "trimestral") {
+    return categories.map((category) => {
+      if (last < 0 || category.quarter * 3 > last) return null;
+      let total = 0;
+      for (let m = category.quarter * 3; m < category.quarter * 3 + 3; m++) total += arr[m];
+      return total;
+    });
+  }
+  if (state.view === "acumulada") {
+    let running = 0;
+    return arr.map((value, month) => {
+      if (last < 0 || month > last) return null;
+      running += value;
+      return running;
+    });
+  }
+  return arr.map((value, month) => (last < 0 || month > last ? null : value));
+}
+
+function buildUfModel(list, win) {
+  const byUf = new Map();
+  for (const client of list) {
+    const key = client.uf || "Sem UF";
+    if (!byUf.has(key)) byUf.set(key, []);
+    byUf.get(key).push(client);
+  }
+  const anchor = state.meta.lastMonth[state.meta.maxYear];
+  let categories;
+  if (state.view === "anual") {
+    const shown = state.meta.years.filter((year) => !state.hiddenYears.has(year));
+    const years = shown.length ? shown : [state.analysisYear];
+    const m1 = Math.max(0, win.kind === "ytd" ? state.meta.lastMonth[state.analysisYear] : win.m1);
+    categories = years.map((year) => ({ label: String(year), allow: true, year }));
+    categories._m1 = m1;
+  } else if (state.view === "trimestral") {
+    categories = [0, 1, 2, 3].map((quarter) => ({
+      label: quarterMonths(quarter),
+      allow: quarter * 3 <= anchor,
+      muted: quarter * 3 > anchor,
+      quarter
+    }));
+  } else {
+    categories = MONTHS_SHORT.map((label, month) => ({
+      label,
+      allow: month <= anchor,
+      muted: month > anchor,
+      month
+    }));
+  }
+  const rows = [];
+  for (const [key, clients] of byUf) {
+    let cur = 0;
+    let prev = 0;
+    for (const client of clients) {
+      const met = metrics(client, win.year, win.m0, win.m1);
+      cur += met.cur;
+      prev += met.prev;
+    }
+    const pct = prev > 0.5 ? ((cur - prev) / prev) * 100 : (cur > 0.5 ? null : 0);
+    rows.push({
+      key,
+      clients: clients.length,
+      novos: clients.filter((client) => client.novo).length,
+      values: ufSeries(clients, state.analysisYear, categories),
+      prevValues: state.view === "anual" ? null : ufSeries(clients, state.analysisYear - 1, categories),
+      cur,
+      prev,
+      pct,
+      color: colorFor("uf:" + key)
+    });
+  }
+  rows.sort((a, b) => {
+    if ((a.pct == null) !== (b.pct == null)) return a.pct == null ? 1 : -1;
+    if (a.pct != null && b.pct != null && a.pct !== b.pct) return a.pct - b.pct;
+    return b.cur - a.cur;
+  });
+  const selected = state.view === "anual"
+    ? categories.findIndex((category) => category.year === state.analysisYear)
+    : state.view === "trimestral"
+      ? (state.period?.type === "quarter" ? state.period.index : null)
+      : (state.period?.type === "month" ? state.period.index : null);
+  return { view: state.view, categories, rows, selected, year: state.analysisYear };
+}
+
 function buildDonut(list, win) {
   const dim = state.donutDim;
   const buckets = new Map();
@@ -621,10 +731,29 @@ function buildDonut(list, win) {
   }
   let slices = [...buckets.entries()]
     .map(([key, value]) => ({ key, value }))
-    .filter((slice) => slice.value > 0.5)
+    .filter((slice) => dim === "vendedor" || slice.value > 0.5)
     .sort((a, b) => b.value - a.value);
-  const limit = dim === "tipo" || dim === "vendedor" ? 16 : 8;
-  if (slices.length > limit) {
+  const limit = dim === "tipo" ? 16 : 8;
+  if (dim === "vendedor") {
+    const seen = new Set(slices.map((slice) => slice.key));
+    for (const [key] of (state.options && state.options.vendedor) || []) {
+      if (seen.has(key)) continue;
+      slices.push({ key, value: 0 });
+    }
+    slices.sort((a, b) => b.value - a.value);
+  } else if (dim === "rede") {
+    const shown = new Set(slices.slice(0, limit).map((slice) => slice.key));
+    const head = slices.filter((slice) => shown.has(slice.key));
+    for (const key of PINNED_REDES) {
+      if (shown.has(key)) continue;
+      head.push({ key, value: buckets.get(key) || 0 });
+      shown.add(key);
+    }
+    head.sort((a, b) => b.value - a.value);
+    const rest = slices.reduce((sum, slice) => shown.has(slice.key) ? sum : sum + slice.value, 0);
+    slices = head;
+    if (rest > 0.5) slices.push({ key: "Outros", value: rest, outros: true });
+  } else if (slices.length > limit) {
     const head = slices.slice(0, limit);
     const rest = slices.slice(limit).reduce((sum, slice) => sum + slice.value, 0);
     slices = head;
@@ -639,6 +768,8 @@ function buildDonut(list, win) {
 
 function paintAll(progress) {
   paintTrend(progress);
+  paintUf(progress);
+  paintUfRank();
   paintDonut(progress);
 }
 
@@ -789,6 +920,136 @@ function paintTrend(progress) {
   });
 }
 
+function ufCut(model) {
+  if (!model) return null;
+  const picked = state.filters.uf;
+  const rows = picked.size ? model.rows.filter((row) => picked.has(row.key)) : model.rows;
+  const n = model.categories.length;
+  const current = Array(n).fill(null);
+  const previous = Array(n).fill(null);
+  let clients = 0;
+  rows.forEach((row) => {
+    clients += row.clients || 0;
+    row.values.forEach((value, index) => {
+      if (value == null) return;
+      current[index] = (current[index] || 0) + value;
+    });
+    if (row.prevValues) {
+      row.prevValues.forEach((value, index) => {
+        if (value == null) return;
+        previous[index] = (previous[index] || 0) + value;
+      });
+    }
+  });
+  const label = !picked.size ? "todos os estados" : [...picked].sort().join(", ");
+  return { rows, current, previous, label, clients };
+}
+
+function ufPaintColor(pct) {
+  if (pct == null || pct > -0.05 && pct < 0.05) return "#e7e9f0";
+  return pct < 0 ? "#8e1214" : "#0f7a5a";
+}
+
+function ensureBrazilMap() {
+  const svg = $("brazilSvg");
+  if (!svg || svg.dataset.ready === "1" || typeof BRAZIL_PATHS === "undefined") return;
+  svg.setAttribute("viewBox", BRAZIL_VIEW);
+  const keys = Object.keys(BRAZIL_PATHS).filter((uf) => uf !== "DF");
+  keys.push("DF");
+  svg.innerHTML = keys.map((uf) =>
+    `<path data-uf="${uf}" d="${BRAZIL_PATHS[uf]}"></path>`
+  ).join("");
+  svg.dataset.ready = "1";
+}
+
+function paintBrazilMap(model) {
+  ensureBrazilMap();
+  const svg = $("brazilSvg");
+  if (!svg || !model) return;
+  const byKey = new Map(model.rows.map((row) => [row.key, row]));
+  const picked = state.filters.uf;
+  const hot = charts.hover && charts.hover.chart === "ufmap" ? charts.hover.key : null;
+  svg.querySelectorAll("path").forEach((path) => {
+    const row = byKey.get(path.dataset.uf);
+    path.setAttribute("fill", ufPaintColor(row ? row.pct : null));
+    path.classList.toggle("is-on", picked.has(path.dataset.uf));
+    path.classList.toggle("is-hot", hot === path.dataset.uf);
+  });
+}
+
+function paintUf(progress) {
+  const canvas = $("ufTrend");
+  const surface = prep(canvas);
+  charts.ufHot = [];
+  if (!surface || !charts.ufTo) return;
+  const { ctx, w, h } = surface;
+  const model = charts.ufTo;
+  const cut = ufCut(model);
+  const anual = state.view === "anual";
+  const series = anual
+    ? [{ values: cut.current }]
+    : [
+      { color: yearColor(model.year - 1), values: cut.previous },
+      { color: yearColor(model.year), values: cut.current }
+    ];
+  const pad = { l: 54, r: 12, t: 16, b: 36 };
+  const plotW = w - pad.l - pad.r;
+  const plotH = h - pad.t - pad.b;
+  const values = [];
+  series.forEach((item) => item.values.forEach((value) => {
+    if (value != null) values.push(value * progress);
+  }));
+  const max = niceMax(Math.max(0, ...values, 0));
+  ctx.font = "12px Outfit, Segoe UI, sans-serif";
+  ctx.textAlign = "right";
+  ctx.textBaseline = "middle";
+  for (let tick = 0; tick <= 4; tick++) {
+    const value = (max * tick) / 4;
+    const y = pad.t + plotH - (max ? (value / max) * plotH : 0);
+    ctx.strokeStyle = "#e7e9f0";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(pad.l, y);
+    ctx.lineTo(w - pad.r, y);
+    ctx.stroke();
+    ctx.fillStyle = "#8b909c";
+    ctx.fillText(formatAxis(value), pad.l - 8, y);
+  }
+  const n = model.categories.length || 1;
+  const groupW = plotW / n;
+  const hoverIndex = charts.hover && charts.hover.chart === "uf" ? charts.hover.index : null;
+  model.categories.forEach((category, index) => {
+    const x = pad.l + index * groupW;
+    if (model.selected === index || hoverIndex === index) {
+      ctx.fillStyle = model.selected === index ? "rgba(210,60,72,0.08)" : "rgba(27,42,74,0.04)";
+      ctx.fillRect(x + 2, pad.t, groupW - 4, plotH);
+    }
+    charts.ufHot.push({ x, y: pad.t, w: groupW, h: plotH, index, allow: category.allow !== false });
+    ctx.fillStyle = category.muted ? "#c5c8d0" : "#5c6370";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "top";
+    ctx.font = "11px Outfit, Segoe UI, sans-serif";
+    ctx.fillText(category.label, x + groupW / 2, pad.t + plotH + 8);
+  });
+  const seriesCount = series.length;
+  const gap = seriesCount > 1 ? 3 : 0;
+  const barW = Math.max(3, Math.min(seriesCount === 1 ? 36 : 14, (groupW * 0.7 - gap * (seriesCount - 1)) / seriesCount));
+  const totalW = seriesCount * barW + (seriesCount - 1) * gap;
+  series.forEach((item, sIndex) => {
+    item.values.forEach((value, index) => {
+      if (value == null || value <= 0) return;
+      const current = value * progress;
+      const gh = pad.l + index * groupW;
+      const x = gh + (groupW - totalW) / 2 + sIndex * (barW + gap);
+      const bh = Math.max(2, (max ? current / max : 0) * plotH);
+      const y = pad.t + plotH - bh;
+      ctx.fillStyle = anual ? yearColor(model.categories[index].year) : item.color;
+      roundTop(ctx, x, y, barW, bh, 4);
+      ctx.fill();
+    });
+  });
+}
+
 function paintDonut(progress) {
   const canvas = $("donut");
   const surface = prep(canvas);
@@ -878,6 +1139,24 @@ function updateCharts(listForTrend, listForDonut, win) {
     charts.donutSig = donutSig;
     changed = true;
   }
+  const uf = buildUfModel(population({ win, focus: true, except: "uf" }), win);
+  const ufSig = state.view + "|" + uf.categories.map((category) => category.label).join(",")
+    + "|" + uf.rows.map((row) => row.key + ":" + row.values.map((value) => Math.round(value || 0)).join(",")).join("|");
+  if (ufSig !== charts.ufSig) {
+    const previous = charts.ufTo;
+    charts.ufFrom = {
+      rows: uf.rows.map((row) => {
+        const prev = previous && previous.rows.find((item) => item.key === row.key);
+        return { values: prev ? prev.values.slice() : row.values.map((value) => (value == null ? null : 0)) };
+      })
+    };
+    charts.ufTo = uf;
+    charts.ufSig = ufSig;
+    changed = true;
+  } else if (charts.ufTo) {
+    charts.ufTo.selected = uf.selected;
+  }
+  renderUfList(uf, win);
   $("chartTitle").textContent = {
     mensal: "Evolução mensal",
     trimestral: "Evolução trimestral",
@@ -912,6 +1191,100 @@ function updateCharts(listForTrend, listForDonut, win) {
       </button>`;
     }).join("")
     : `<p class="empty-row">Sem faturamento neste recorte.</p>`;
+}
+
+function renderUfList(model, win) {
+  const down = model.rows.filter((row) => row.pct != null && row.pct < -0.05).length;
+  const viewLabel = {
+    mensal: "Mês a mês",
+    trimestral: "Por trimestre",
+    anual: "Por ano",
+    acumulada: "Acumulada"
+  }[state.view];
+  const below = down
+    ? down + (down === 1 ? " estado abaixo" : " estados abaixo") + " do ano anterior."
+    : "Nenhum estado abaixo do ano anterior.";
+  $("ufSub").textContent = viewLabel + " de " + win.year
+    + " · " + rangeLabel(win.m0, win.m1) + " em relação a " + (win.year - 1) + ". " + below;
+  $("ufSummary").textContent = $("ufSub").textContent;
+  const cut = ufCut(model);
+  $("ufCut").textContent = "Recorte: " + cut.label
+    + (state.view === "anual" ? "" : " · " + (model.year - 1) + " e " + model.year)
+    + " · " + cut.clients.toLocaleString("pt-BR") + (cut.clients === 1 ? " cliente" : " clientes");
+  document.querySelectorAll("#ufSort button").forEach((button) => {
+    button.setAttribute("aria-pressed", button.dataset.ufSort === state.ufSort ? "true" : "false");
+  });
+  $("ufRankTitle").textContent = state.ufSort === "up" ? "Quem cresceu" : "Quem caiu";
+  paintBrazilMap(model);
+  paintUfRank();
+}
+
+function ufRankRows(model) {
+  if (!model) return [];
+  const growing = state.ufSort === "up";
+  return model.rows
+    .filter((row) => row.pct != null && (growing ? row.pct > 0.05 : row.pct < -0.05))
+    .sort((a, b) => growing ? b.pct - a.pct : a.pct - b.pct);
+}
+
+function paintUfRank() {
+  const canvas = $("ufRank");
+  if (!canvas || !charts.ufTo) return;
+  const growing = state.ufSort === "up";
+  const rows = ufRankRows(charts.ufTo);
+  const rowH = 32;
+  const plot = canvas.parentElement;
+  const height = Math.max(72, rows.length ? rows.length * rowH + 8 : 72);
+  if (plot.clientHeight !== height) plot.style.height = height + "px";
+  const surface = prep(canvas);
+  charts.rankHot = [];
+  if (!surface) return;
+  const { ctx, w, h } = surface;
+  if (!rows.length) {
+    ctx.fillStyle = "#8b909c";
+    ctx.font = "13px Outfit, Segoe UI, sans-serif";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(growing ? "Nenhum estado cresceu neste recorte." : "Nenhum estado caiu neste recorte.", 8, h / 2);
+    return;
+  }
+  const picked = state.filters.uf;
+  const hotKey = charts.hover && charts.hover.key;
+  const labelW = 36;
+  const pctW = 72;
+  const x0 = labelW + 8;
+  const x1 = w - pctW;
+  const spanOf = (pct) => Math.sqrt(Math.abs(pct));
+  const max = Math.max(...rows.map((row) => spanOf(row.pct)), 1);
+  ctx.font = "13px Outfit, Segoe UI, sans-serif";
+  ctx.textBaseline = "middle";
+  rows.forEach((row, index) => {
+    const y = 4 + index * rowH;
+    const faded = picked.size && !picked.has(row.key);
+    const hot = hotKey === row.key;
+    if (hot || picked.has(row.key)) {
+      ctx.fillStyle = hot ? "rgba(27,42,74,0.05)" : "rgba(210,60,72,0.06)";
+      ctx.fillRect(0, y, w, rowH);
+    }
+    charts.rankHot.push({ x: 0, y, w, h: rowH, key: row.key });
+    ctx.globalAlpha = faded ? 0.35 : 1;
+    ctx.fillStyle = "#1b2a4a";
+    ctx.textAlign = "left";
+    ctx.font = "650 13px Outfit, Segoe UI, sans-serif";
+    ctx.fillText(row.key, 4, y + rowH / 2);
+    const span = Math.max(8, x1 - x0);
+    const bw = Math.max(4, (spanOf(row.pct) / max) * span);
+    const by = y + (rowH - 14) / 2;
+    ctx.fillStyle = growing ? "#0f7a5a" : "#8e1214";
+    ctx.beginPath();
+    ctx.roundRect(x0, by, bw, 14, 4);
+    ctx.fill();
+    ctx.fillStyle = growing ? "#0f7a5a" : "#8e1214";
+    ctx.textAlign = "right";
+    ctx.font = "650 13px Outfit, Segoe UI, sans-serif";
+    ctx.fillText(formatPct(row.pct), w - 8, y + rowH / 2);
+    ctx.globalAlpha = 1;
+  });
 }
 
 function renderKpis(win, list) {
@@ -956,7 +1329,12 @@ function renderKpis(win, list) {
     card.classList.add("is-up");
     tween($("kpiVar"), pct, formatPct);
   }
-  $("kpiVarSub").textContent = prev > 0.5 ? (cur - prev >= 0 ? "+" : "") + formatMoneyWords(cur - prev) + " contra " + (win.year - 1) : "sem base em " + (win.year - 1);
+  const delta = cur - prev;
+  $("kpiVarSub").textContent = prev > 0.5
+    ? (Math.abs(delta) < 0.5
+      ? "igual a " + (win.year - 1)
+      : formatMoneyWords(Math.abs(delta)) + (delta > 0 ? " a mais que " : " a menos que ") + (win.year - 1))
+    : "sem base em " + (win.year - 1);
   tween($("kpiActive"), active, (value) => Math.round(value).toLocaleString("pt-BR"));
   $("kpiActiveSub").textContent = "de " + list.length.toLocaleString("pt-BR") + " no recorte";
   if (ticket == null) tweenMoney("kpiTicket", null);
@@ -1240,7 +1618,15 @@ function renderChips() {
     }
   }
   if (state.period?.type === "month") chips.push({ kind: "period", label: MONTHS[state.period.index] });
-  if (state.period?.type === "quarter") chips.push({ kind: "period", label: "T" + (state.period.index + 1) });
+  if (state.period?.type === "quarter") chips.push({ kind: "period", label: quarterMonths(state.period.index) });
+  const picked = state.filters.cliente;
+  if (picked.size > 8) chips.push({ kind: "clients", label: picked.size + " clientes" });
+  else {
+    for (const id of picked) {
+      const pickedClient = state.clients.find((item) => item.id === id);
+      chips.push({ kind: "dim", dim: "cliente", value: id, label: "Cliente: " + (pickedClient ? pickedClient.nome : id) });
+    }
+  }
   if (state.cohort) chips.push({ kind: "cohort", label: COHORTS[state.cohort] });
   if (state.clientId) {
     const client = state.clients.find((item) => item.id === state.clientId);
@@ -1256,6 +1642,7 @@ function renderChips() {
 }
 
 function syncFilterUI() {
+  syncClientMenu();
   document.querySelectorAll(".menu").forEach((menu) => {
     const dim = menu.dataset.dim;
     const set = state.filters[dim];
@@ -1266,7 +1653,14 @@ function syncFilterUI() {
     panel.hidden = !open;
     menu.querySelector(".menu-btn").setAttribute("aria-expanded", open ? "true" : "false");
     const label = menu.querySelector(".menu-v");
-    label.textContent = !set.size ? "Todos" : set.size === 1 ? [...set][0] : set.size + " selecionados";
+    if (!set.size) label.textContent = "Todos";
+    else if (set.size === 1) {
+      const only = [...set][0];
+      if (dim === "cliente") {
+        const pickedClient = state.clients.find((item) => item.id === only);
+        label.textContent = pickedClient ? pickedClient.nome : only;
+      } else label.textContent = only;
+    } else label.textContent = set.size + " selecionados";
     menu.querySelectorAll("input[type=checkbox]").forEach((input) => {
       input.checked = set.has(input.dataset.filterValue);
     });
@@ -1287,6 +1681,7 @@ function renderYears() {
 
 function renderAll() {
   if (!state.meta) return;
+  pruneClientFilter();
   const win = windowOf();
   const kpiList = population({ win, focus: true });
   const trendList = population({ win, focus: true });
@@ -1309,25 +1704,78 @@ function renderAll() {
     + (client ? " · foco em " + client.nome : "");
 }
 
-function buildFilters() {
-  const bar = $("filterBar");
-  bar.innerHTML = DIMS.map((dim) => {
-    const options = state.options[dim.key].map(([value, count]) =>
-      `<label class="opt" data-label="${esc(value)}"><input type="checkbox" data-filter-dim="${dim.key}" data-filter-value="${esc(value)}"><span>${esc(value)}</span><em>${count}</em></label>`
-    ).join("");
-    return `<div class="menu" data-dim="${dim.key}">
+let clientMenuSig = "";
+
+function portfolioClients() {
+  const sellers = state.filters.vendedor;
+  return state.clients
+    .filter((client) => !sellers.size || sellers.has(client.vendedor))
+    .sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+}
+
+function clientOptionsHtml(clients) {
+  return clients.map((client) =>
+    `<label class="opt" data-label="${esc(client.nome + " " + (client.cod || "") + " " + (client.cnpj || ""))}"><input type="checkbox" data-filter-dim="cliente" data-filter-value="${esc(client.id)}"><span>${esc(client.nome)}</span><em>${esc(client.cod || client.uf)}</em></label>`
+  ).join("");
+}
+
+function pruneClientFilter() {
+  const sellers = state.filters.vendedor;
+  if (!sellers.size || !state.filters.cliente.size) return;
+  for (const id of [...state.filters.cliente]) {
+    const client = state.clients.find((item) => item.id === id);
+    if (!client || !sellers.has(client.vendedor)) state.filters.cliente.delete(id);
+  }
+}
+
+function syncClientMenu() {
+  const menu = document.querySelector(".menu-client");
+  if (!menu) return;
+  const sig = [...state.filters.vendedor].sort().join("|");
+  if (sig === clientMenuSig) return;
+  clientMenuSig = sig;
+  const list = menu.querySelector(".menu-list");
+  const search = menu.querySelector("input[type=search]");
+  const q = norm(search ? search.value : "");
+  const clients = portfolioClients();
+  list.innerHTML = clients.length
+    ? clientOptionsHtml(clients)
+    : `<p class="empty-row">Nenhum cliente nesta carteira.</p>`;
+  if (!q) return;
+  list.querySelectorAll(".opt").forEach((opt) => {
+    opt.hidden = !norm(opt.dataset.label).includes(q);
+  });
+}
+
+function filterMenu(dim, label, options, extraClass) {
+  return `<div class="menu${extraClass ? " " + extraClass : ""}" data-dim="${dim}">
       <button type="button" class="menu-btn" aria-expanded="false">
-        <span class="menu-k">${dim.label}</span>
+        <span class="menu-k">${label}</span>
         <span class="menu-v">Todos</span>
         <svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>
       </button>
       <div class="menu-panel" hidden>
-        <input type="search" placeholder="Filtrar lista" aria-label="Filtrar ${dim.label}">
-        <div class="menu-actions"><button type="button" data-act="clear">Mostrar todos</button></div>
+        <input type="search" placeholder="Filtrar lista" aria-label="Filtrar ${label}">
+        <div class="menu-actions"><button type="button" data-act="all">Marcar todos</button></div>
         <div class="menu-list">${options}</div>
       </div>
     </div>`;
-  }).join("");
+}
+
+function buildFilters() {
+  const bar = $("filterBar");
+  const menus = [];
+  for (const dim of DIMS) {
+    const options = state.options[dim.key].map(([value, count]) =>
+      `<label class="opt" data-label="${esc(value)}"><input type="checkbox" data-filter-dim="${dim.key}" data-filter-value="${esc(value)}"><span>${esc(value)}</span><em>${count}</em></label>`
+    ).join("");
+    menus.push(filterMenu(dim.key, dim.label, options));
+    if (dim.key === "vendedor") {
+      menus.push(filterMenu("cliente", "Cliente", clientOptionsHtml(portfolioClients()), "menu-client"));
+    }
+  }
+  clientMenuSig = [...state.filters.vendedor].sort().join("|");
+  bar.innerHTML = menus.join("");
 
   bar.querySelectorAll(".menu-btn").forEach((button) => {
     button.addEventListener("click", (event) => {
@@ -1355,7 +1803,7 @@ function buildFilters() {
 }
 
 function resetViewState() {
-  state.filters = { vendedor: new Set(), rede: new Set(), tipo: new Set(), uf: new Set() };
+  state.filters = { vendedor: new Set(), rede: new Set(), tipo: new Set(), uf: new Set(), cliente: new Set() };
   state.cohort = null;
   state.listTab = "up";
   state.period = null;
@@ -1365,13 +1813,16 @@ function resetViewState() {
   state.searchPick = null;
   state.analysisYear = state.meta.maxYear;
   state.rankSort = { key: "revenue", dir: "desc" };
+  state.ufSort = "down";
   state.openMenu = null;
   $("q").value = "";
   charts.colorOf = new Map();
   charts.trendSig = "";
   charts.donutSig = "";
+  charts.ufSig = "";
   charts.trendTo = null;
   charts.donutTo = null;
+  charts.ufTo = null;
 }
 
 function showLoading(text) {
@@ -1524,13 +1975,21 @@ function bind() {
   $("filterBar").addEventListener("click", (event) => {
     const act = event.target.closest("[data-act]");
     if (!act) return;
-    const dim = act.closest(".menu").dataset.dim;
-    state.filters[dim].clear();
+    const menu = act.closest(".menu");
+    const dim = menu.dataset.dim;
+    const set = state.filters[dim];
+    if (act.dataset.act === "all") {
+      menu.querySelectorAll(".opt").forEach((opt) => {
+        if (opt.hidden) return;
+        set.add(opt.querySelector("input").dataset.filterValue);
+      });
+    } else set.clear();
     renderAll();
-  });
+  }, true);
 
   $("btnClear").addEventListener("click", () => {
     for (const dim of DIMS) state.filters[dim.key].clear();
+    state.filters.cliente.clear();
     state.period = null;
     state.cohort = null;
     state.clientId = null;
@@ -1547,6 +2006,7 @@ function bind() {
     const chip = $("chips")._chips[Number(button.dataset.chip)];
     if (!chip) return;
     if (chip.kind === "dim") state.filters[chip.dim].delete(chip.value);
+    if (chip.kind === "clients") state.filters.cliente.clear();
     if (chip.kind === "period") state.period = null;
     if (chip.kind === "cohort") state.cohort = null;
     if (chip.kind === "client") state.clientId = null;
@@ -1695,6 +2155,115 @@ function bind() {
     hideTip("chart");
     paintTrend(charts.p || 1);
   });
+  function ufHit(event) {
+    return charts.ufHot.find((spot) => event.offsetX >= spot.x && event.offsetX <= spot.x + spot.w && event.offsetY >= spot.y && event.offsetY <= spot.y + spot.h);
+  }
+  function ufTooltip(index) {
+    const model = charts.ufTo;
+    if (!model) return "";
+    const cut = ufCut(model);
+    const category = model.categories[index];
+    const cur = cut.current[index];
+    const prev = state.view === "anual" ? null : cut.previous[index];
+    const pct = cur != null && prev != null && prev > 0.5 ? ((cur - prev) / prev) * 100 : null;
+    const tone = pct == null ? "" : pct < -0.05 ? "down" : pct > 0.05 ? "up" : "";
+    const pctHtml = pct == null ? "" : `<em class="${tone}">${formatPct(pct)}</em>`;
+    const prevHtml = prev == null ? "" : `<div class="row"><span>${model.year - 1}</span><b>${formatCompact(prev)}</b></div>`;
+    const curHtml = cur == null ? "" : `<div class="row"><span>${state.view === "anual" ? esc(category.label) : model.year}</span><b>${formatCompact(cur)}${pctHtml}</b></div>`;
+    return `<b>${esc(cut.label)} · ${esc(category.label)}</b>${prevHtml}${curHtml}`;
+  }
+  function toggleUf(value) {
+    const set = state.filters.uf;
+    if (set.has(value)) set.delete(value);
+    else set.add(value);
+    renderAll();
+  }
+  const ufTrend = $("ufTrend");
+  ufTrend.addEventListener("pointermove", (event) => {
+    const hit = ufHit(event);
+    charts.hover = hit ? { chart: "uf", index: hit.index } : null;
+    ufTrend.style.cursor = hit ? (hit.allow ? "pointer" : "not-allowed") : "default";
+    paintUf(charts.p || 1);
+    if (!hit) { hideTip("uf"); return; }
+    showTip(event.clientX, event.clientY, ufTooltip(hit.index), "uf");
+  });
+  ufTrend.addEventListener("pointerleave", () => {
+    charts.hover = null;
+    hideTip("uf");
+    paintUf(charts.p || 1);
+  });
+  ufTrend.addEventListener("click", (event) => {
+    const hit = ufHit(event);
+    if (!hit || !charts.ufTo) return;
+    const category = charts.ufTo.categories[hit.index];
+    if (state.view === "anual") {
+      state.analysisYear = category.year;
+      renderAll();
+      return;
+    }
+    if (state.view === "trimestral") pickPeriod("quarter", category.quarter);
+    else pickPeriod("month", category.month);
+  });
+  $("ufSort").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-uf-sort]");
+    if (!button || button.dataset.ufSort === state.ufSort || !charts.ufTo) return;
+    state.ufSort = button.dataset.ufSort;
+    renderUfList(charts.ufTo, windowOf());
+  });
+  const ufRank = $("ufRank");
+  function rankHit(event) {
+    return charts.rankHot.find((spot) => event.offsetX >= spot.x && event.offsetX <= spot.x + spot.w && event.offsetY >= spot.y && event.offsetY <= spot.y + spot.h);
+  }
+  ufRank.addEventListener("pointermove", (event) => {
+    const hit = rankHit(event);
+    charts.hover = hit ? { chart: "ufmap", key: hit.key } : null;
+    ufRank.style.cursor = hit ? "pointer" : "default";
+    paintUfRank();
+    paintBrazilMap(charts.ufTo);
+    if (!hit || !charts.ufTo) { hideTip("ufrank"); return; }
+    const row = charts.ufTo.rows.find((item) => item.key === hit.key);
+    if (!row) { hideTip("ufrank"); return; }
+    const people = row.clients.toLocaleString("pt-BR") + (row.clients === 1 ? " cliente" : " clientes");
+    const fresh = row.novos.toLocaleString("pt-BR") + (row.novos === 1 ? " novo" : " novos");
+    showTip(event.clientX, event.clientY, `<b>${esc(row.key)} · ${formatPct(row.pct)}</b><div>${people}</div><div>${fresh}</div><div>${formatCompact(row.cur)}</div>`, "ufrank");
+  });
+  ufRank.addEventListener("pointerleave", () => {
+    charts.hover = null;
+    hideTip("ufrank");
+    paintUfRank();
+    paintBrazilMap(charts.ufTo);
+  });
+  ufRank.addEventListener("click", (event) => {
+    const hit = rankHit(event);
+    if (hit) toggleUf(hit.key);
+  });
+  $("brazilSvg").addEventListener("click", (event) => {
+    const path = event.target.closest("path[data-uf]");
+    if (!path) return;
+    toggleUf(path.dataset.uf);
+  });
+  $("brazilSvg").addEventListener("pointermove", (event) => {
+    const path = event.target.closest("path[data-uf]");
+    charts.hover = path ? { chart: "ufmap", key: path.dataset.uf } : null;
+    paintBrazilMap(charts.ufTo);
+    paintUfRank();
+    if (!path || !charts.ufTo) { hideTip("ufmap"); return; }
+    const row = charts.ufTo.rows.find((item) => item.key === path.dataset.uf);
+    const clients = row ? row.clients : 0;
+    const money = row ? formatCompact(row.cur) : formatCompact(0);
+    const pct = row ? formatPct(row.pct) : "—";
+    const people = clients.toLocaleString("pt-BR") + (clients === 1 ? " cliente" : " clientes");
+    const novos = row ? row.novos : 0;
+    const fresh = novos.toLocaleString("pt-BR") + (novos === 1 ? " novo" : " novos");
+    showTip(event.clientX, event.clientY, `<b>${esc(path.dataset.uf)}</b><div>${people}</div><div>${fresh}</div><div>${money} · ${pct}</div>`, "ufmap");
+  });
+  $("brazilSvg").addEventListener("pointerleave", () => {
+    charts.hover = null;
+    hideTip("ufmap");
+    paintBrazilMap(charts.ufTo);
+    paintUfRank();
+  });
+
   trend.addEventListener("click", (event) => {
     const hit = charts.hot.find((spot) => event.offsetX >= spot.x && event.offsetX <= spot.x + spot.w && event.offsetY >= spot.y && event.offsetY <= spot.y + spot.h);
     if (!hit) return;
@@ -1757,6 +2326,8 @@ function bind() {
   if (window.ResizeObserver) {
     new ResizeObserver(resize).observe($("trend").parentElement);
     new ResizeObserver(resize).observe($("donut").parentElement);
+    new ResizeObserver(resize).observe($("ufTrend").parentElement);
+    new ResizeObserver(resize).observe($("ufRank").parentElement);
   }
 }
 

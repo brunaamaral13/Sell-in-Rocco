@@ -27,6 +27,10 @@
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/></svg>
           Evolução
         </button>
+        <button type="button" data-goto="sec-uf">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z"/><circle cx="12" cy="10" r="2.2"/></svg>
+          Por UF
+        </button>
         <button type="button" data-goto="sec-alertas">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3 19h18L12 4z"/><path d="M12 10v4M12 16.5v.5"/></svg>
           Alertas
@@ -86,7 +90,7 @@
               <div class="filter-bar" id="filterBar"></div>
               <button type="button" class="text-btn" id="btnClear" hidden>Limpar recortes</button>
             </div>
-            <p class="hint">A base entra inteira. Escolha vendedor, rede, tipo ou UF — ou clique num mês, numa fatia e num cliente para cruzar a análise.</p>
+            <p class="hint">A base entra inteira. Escolha vendedor, rede, tipo, UF ou cliente — ou clique num mês, numa fatia e num cliente para cruzar a análise.</p>
             <div class="chips" id="chips" hidden></div>
 
             <div class="kpis">
@@ -191,6 +195,48 @@
             </article>
           </section>
 
+          <section id="sec-uf" data-section>
+            <article class="card">
+              <header class="card-head">
+                <div>
+                  <h2>Evolução por UF</h2>
+                  <p id="ufSub">O gráfico abaixo mostra só quem caiu ou só quem cresceu, conforme a seleção.</p>
+                </div>
+              </header>
+              <div class="uf-layout">
+                <div class="brazil-wrap">
+                  <div class="map-side">
+                    <div class="map-legend">
+                      <span><i class="dot-up"></i>Cresceu</span>
+                      <span><i class="dot-down"></i>Caiu</span>
+                    </div>
+                    <p class="map-note">Clique num estado para o recorte.</p>
+                  </div>
+                  <svg id="brazilSvg" viewBox="0 0 440 470" role="img" aria-label="Mapa do Brasil por estado"></svg>
+                </div>
+                <div class="uf-bars">
+                  <p id="ufCut" class="uf-cut">Recorte: todos os estados</p>
+                  <div class="plot-wrap">
+                    <canvas id="ufTrend" aria-describedby="ufSummary"></canvas>
+                  </div>
+                </div>
+              </div>
+              <div class="uf-rank">
+                <div class="uf-rank-head">
+                  <p id="ufRankTitle">Quem caiu</p>
+                  <div class="seg seg-sm" id="ufSort">
+                    <button type="button" data-uf-sort="down" aria-pressed="true">Queda</button>
+                    <button type="button" data-uf-sort="up" aria-pressed="false">Crescimento</button>
+                  </div>
+                </div>
+                <div class="uf-rank-plot">
+                  <canvas id="ufRank" aria-label="Variação dos estados"></canvas>
+                </div>
+              </div>
+              <p id="ufSummary" class="sr-only"></p>
+            </article>
+          </section>
+
           <section class="grid-bot">
             <article class="card" id="sec-alertas" data-section>
               <header class="card-head">
@@ -267,6 +313,7 @@
     </div>
   </div>
 
+  <script src="brazil-map.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

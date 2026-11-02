@@ -262,7 +262,10 @@ body.is-drag .drop { border-color: var(--red); transform: translateY(-2px); }
   width: 100%; border: 1px solid var(--line); border-radius: 10px;
   padding: 8px 10px; margin-bottom: 6px; outline: none;
 }
-.menu-actions { display: flex; justify-content: flex-end; margin-bottom: 4px; }
+.menu-actions { display: flex; justify-content: flex-start; gap: 8px; margin-bottom: 4px; }
+.menu-client .menu-panel { width: 360px; left: 0; right: auto; }
+.menu-client .menu-btn { max-width: 280px; }
+.menu-client .menu-v { max-width: 160px; }
 .menu-actions button, .text-btn {
   border: 0; background: transparent; color: var(--red); font-weight: 650; font-size: 13px; padding: 4px 6px;
 }
@@ -411,6 +414,29 @@ body.is-drag .drop { border-color: var(--red); transform: translateY(-2px); }
 .legend button.is-off { opacity: .35; }
 
 .plot-wrap { position: relative; height: 460px; }
+.uf-layout { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 12px 24px; align-items: start; }
+.uf-bars { display: flex; flex-direction: column; min-width: 0; }
+.uf-layout .plot-wrap { height: 480px; }
+.uf-rank { margin-top: 8px; }
+.uf-rank-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 6px; }
+.uf-rank-head p { margin: 0; font-size: 13px; font-weight: 650; }
+.uf-rank-plot { position: relative; height: 280px; }
+.uf-rank-plot canvas { position: absolute; inset: 0; width: 100%; height: 100%; cursor: pointer; }
+.brazil-wrap { min-width: 0; display: grid; grid-template-columns: 1fr; align-items: start; gap: 8px; }
+.brazil-wrap svg { width: 100%; height: auto; max-height: none; display: block; }
+.map-side { display: flex; flex-direction: row; align-items: center; flex-wrap: wrap; gap: 8px 16px; max-width: none; }
+.brazil-wrap path { stroke: #fff; stroke-width: 0.8; cursor: pointer; }
+.brazil-wrap path.is-hot { stroke: #1b2a4a; stroke-width: 1.6; }
+.brazil-wrap path.is-on { stroke: #1b2a4a; stroke-width: 2.2; }
+.map-legend { display: flex; flex-direction: row; align-items: center; gap: 14px; margin: 0; font-size: 12px; font-weight: 650; color: var(--ink); }
+.map-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.map-legend i { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+.map-legend .dot-up { background: #0f7a5a; }
+.map-legend .dot-down { background: #8e1214; }
+.map-note { color: var(--muted); font-size: 12px; margin: 0; text-align: left; line-height: 1.35; }
+.uf-cut { margin: 0 0 4px; font-size: 13px; font-weight: 650; }
+.uf-list b.is-down { color: var(--down); }
+.uf-list b.is-up { color: var(--green); }
 .plot-wrap canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
 
 .donut-layout { display: grid; grid-template-columns: 220px 1fr; gap: 8px; align-items: center; }
@@ -688,7 +714,9 @@ body.is-drag .drop { border-color: var(--red); transform: translateY(-2px); }
   .top { flex-direction: column; align-items: stretch; }
   .top h1 { font-size: 28px; }
   .kpis, .insights, .grid-mid, .grid-bot { grid-template-columns: 1fr; }
-  .plot-wrap { height: 280px; }
+  .plot-wrap, .uf-layout .plot-wrap { height: 280px; min-height: 0; flex: none; }
+  .uf-layout { grid-template-columns: 1fr; }
+  .brazil-wrap svg { max-height: 420px; }
   .donut-layout { grid-template-columns: 1fr; }
   .col-vend { display: none; }
 }
