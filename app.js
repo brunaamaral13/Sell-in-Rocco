@@ -45,6 +45,7 @@ const state = {
   donutDim: "tipo",
   view: "mensal",
   search: "",
+  searchPick: null,
   hideZeros: true,
   rankSort: { key: "revenue", dir: "desc" },
   openMenu: null,
@@ -324,6 +325,33 @@ function parseWorkbook(text) {
 
 function formatFull(n) {
   return Number(n || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+function moneyParts(n) {
+  const sign = n < 0 ? "-" : "";
+  const v = Math.abs(n);
+  const num = (div) => (v / div).toLocaleString("pt-BR", { maximumFractionDigits: 1, minimumFractionDigits: 1 });
+  if (v >= 1e9) {
+    const qty = v / 1e9;
+    return { value: sign + "R$ " + num(1e9), unit: Math.abs(qty - 1) < 0.05 ? "bilhão" : "bilhões" };
+  }
+  if (v >= 1e6) {
+    const qty = v / 1e6;
+    return { value: sign + "R$ " + num(1e6), unit: Math.abs(qty - 1) < 0.05 ? "milhão" : "milhões" };
+  }
+  if (v >= 1e3) return { value: sign + "R$ " + num(1e3), unit: "mil" };
+  return { value: sign + formatFull(v), unit: "" };
+}
+function formatMoneyWords(n) {
+  const parts = moneyParts(n);
+  return parts.unit ? parts.value + " " + parts.unit : parts.value;
+}
+function tweenMoney(id, value) {
+  if (value == null || !Number.isFinite(value)) {
+    $(id).textContent = "—";
+    $(id)._v = 0;
+    return;
+  }
+  tween($(id), value, formatMoneyWords);
 }
 function formatCompact(n) {
   const sign = n < 0 ? "-" : "";
@@ -900,8 +928,17 @@ function renderKpis(win, list) {
   const months = win.m1 - win.m0 + 1;
   const ticket = active ? cur / active / months : null;
   $("kpiRevenueLabel").textContent = "Faturamento " + win.year;
-  tween($("kpiRevenue"), cur, formatCompact);
-  $("kpiRevenueSub").textContent = rangeLabel(win.m0, win.m1) + (prev > 0.5 ? " · ano anterior " + formatCompact(prev) : "");
+  tweenMoney("kpiRevenue", cur);
+  const range = rangeLabel(win.m0, win.m1);
+  const pctLabel = pct == null ? "novo" : formatPct(pct);
+  const pctClass = pct == null || pct > 0.05 ? "var-up" : pct < -0.05 ? "var-down" : "";
+  if (prev > 0.5) {
+    $("kpiRevenueSub").innerHTML = range + "<br>ano anterior " + formatMoneyWords(prev) + ' · <b class="' + pctClass + '">' + pctLabel + "</b>";
+  } else if (cur > 0.5) {
+    $("kpiRevenueSub").innerHTML = range + '<br><b class="var-up">novo</b>';
+  } else {
+    $("kpiRevenueSub").textContent = range;
+  }
   const card = $("kpiVarCard");
   card.classList.remove("is-up", "is-down", "is-flat", "kpi-green");
   if (pct == null) {
@@ -919,12 +956,11 @@ function renderKpis(win, list) {
     card.classList.add("is-up");
     tween($("kpiVar"), pct, formatPct);
   }
-  $("kpiVarSub").textContent = prev > 0.5 ? (cur - prev >= 0 ? "+" : "") + formatCompact(cur - prev).replace("R$ ", "R$ ") + " contra " + (win.year - 1) : "sem base em " + (win.year - 1);
+  $("kpiVarSub").textContent = prev > 0.5 ? (cur - prev >= 0 ? "+" : "") + formatMoneyWords(cur - prev) + " contra " + (win.year - 1) : "sem base em " + (win.year - 1);
   tween($("kpiActive"), active, (value) => Math.round(value).toLocaleString("pt-BR"));
   $("kpiActiveSub").textContent = "de " + list.length.toLocaleString("pt-BR") + " no recorte";
-  if (ticket == null) {
-    $("kpiTicket").textContent = "—";
-  } else tween($("kpiTicket"), ticket, formatCompact);
+  if (ticket == null) tweenMoney("kpiTicket", null);
+  else tweenMoney("kpiTicket", ticket);
   $("kpiTicketSub").textContent = "média de " + months + (months > 1 ? " meses" : " mês");
 }
 
@@ -1001,8 +1037,57 @@ function renderAlerts(win, base) {
   $("howRange").textContent = how[state.listTab] || ("Intervalo: " + range + " contra " + (win.year - 1) + ". " + idleAnchor + ".");
 }
 
+function codeHits(query) {
+  const digits = String(query || "").replace(/\D/g, "");
+  const compact = String(query || "").replace(/\s/g, "");
+  if (digits.length < 2 || digits.length !== compact.length || !state.clients) return [];
+  const hits = state.clients.filter((client) => String(client.cod || "").replace(/\D/g, "").includes(digits));
+  hits.sort((a, b) => {
+    const rank = (client) => {
+      const cod = String(client.cod || "").replace(/\D/g, "");
+      if (cod === digits) return 0;
+      if (cod.startsWith(digits)) return 1;
+      return 2;
+    };
+    const diff = rank(a) - rank(b);
+    if (diff) return diff;
+    return String(a.cod).length - String(b.cod).length || a.nome.localeCompare(b.nome, "pt-BR");
+  });
+  return hits;
+}
+
+function renderSearchHit() {
+  const box = $("searchHit");
+  const input = $("q");
+  if (!box || !input) return;
+  if (state.searchPick) {
+    box.hidden = true;
+    box.innerHTML = "";
+    input.setAttribute("aria-expanded", "false");
+    return;
+  }
+  const hits = codeHits(state.search);
+  if (!hits.length) {
+    box.hidden = true;
+    box.innerHTML = "";
+    input.setAttribute("aria-expanded", "false");
+    return;
+  }
+  const shown = hits.slice(0, 6);
+  box.hidden = false;
+  input.setAttribute("aria-expanded", "true");
+  box.innerHTML = shown.map((client) => `
+    <button type="button" data-id="${esc(client.id)}">
+      <b>${esc(client.nome)}</b>
+      <small>Cód. ${esc(client.cod || "—")}${client.vendedor ? " · " + esc(client.vendedor) : ""}</small>
+    </button>`).join("")
+    + (hits.length > shown.length ? `<p class="search-more">Mais ${hits.length - shown.length} ${hits.length - shown.length === 1 ? "cliente" : "clientes"}. Continue o código.</p>` : "");
+}
+
 function renderRanking(win) {
-  const list = population({ win, focus: false });
+  const list = state.searchPick
+    ? state.clients.filter((client) => client.id === state.searchPick)
+    : population({ win, focus: false });
   const q = norm(state.search);
   const qDigits = q.replace(/\D/g, "");
   let rows = list.map((client) => {
@@ -1017,7 +1102,7 @@ function renderRanking(win) {
     });
   }
   const books = rows.reduce((sum, row) => sum + row.client.saldo, 0);
-  if (state.cohort !== "idle" && state.cohort !== "new" && state.cohort !== "stuck" && state.hideZeros) {
+  if (!state.searchPick && state.cohort !== "idle" && state.cohort !== "new" && state.cohort !== "stuck" && state.hideZeros) {
     rows = rows.filter((row) => row.met.cur > 0.5 || row.met.prev > 0.5 || (state.cohort === "low" && row.low));
   }
   const dir = state.rankSort.dir === "asc" ? 1 : -1;
@@ -1210,6 +1295,7 @@ function renderAll() {
   renderKpis(win, kpiList);
   renderAlerts(win, base);
   renderRanking(win);
+  renderSearchHit();
   renderDrawer(win);
   renderChips();
   syncFilterUI();
@@ -1276,6 +1362,7 @@ function resetViewState() {
   state.hiddenYears = new Set();
   state.clientId = null;
   state.search = "";
+  state.searchPick = null;
   state.analysisYear = state.meta.maxYear;
   state.rankSort = { key: "revenue", dir: "desc" };
   state.openMenu = null;
@@ -1373,7 +1460,16 @@ function trendTooltip(index) {
     const label = model.kind === "single" ? category.label : String(series.year);
     const color = model.kind === "single" ? yearColor(category.year) : series.color;
     const shown = value == null ? "—" : formatFull(value);
-    return `<div class="row"><span><i class="dot" style="background:${color}"></i>${label}</span><b>${shown}</b></div>`;
+    const prev = model.kind === "single"
+      ? (index > 0 ? series.values[index - 1] : null)
+      : (sIndex > 0 ? model.series[sIndex - 1].values[index] : null);
+    let pct = "";
+    if (value != null && prev != null) {
+      const change = prev > 0.5 ? ((value - prev) / prev) * 100 : (value > 0.5 ? null : 0);
+      const tone = change == null || change > 0.05 ? "up" : change < -0.05 ? "down" : "";
+      pct = `<em class="${tone}">${formatPct(change)}</em>`;
+    }
+    return `<div class="row"><span><i class="dot" style="background:${color}"></i>${label}</span><b>${shown}${pct}</b></div>`;
   }).join("");
   const extra = category.allow === false ? `<div>Mês ainda sem movimento na base.</div>` : "";
   return `<b>${category.label}</b>${extra}${rows}`;
@@ -1439,6 +1535,7 @@ function bind() {
     state.cohort = null;
     state.clientId = null;
     state.search = "";
+    state.searchPick = null;
     $("q").value = "";
     state.hiddenYears.clear();
     renderAll();
@@ -1522,7 +1619,26 @@ function bind() {
 
   $("q").addEventListener("input", () => {
     state.search = $("q").value;
-    if (state.meta) renderRanking(windowOf());
+    state.searchPick = null;
+    if (state.meta) {
+      renderRanking(windowOf());
+      renderSearchHit();
+    }
+    $("btnClear").hidden = !hasActiveFilters();
+  });
+
+  $("searchHit").addEventListener("click", (event) => {
+    const button = event.target.closest("[data-id]");
+    if (!button || !state.clients) return;
+    const client = state.clients.find((item) => item.id === button.dataset.id);
+    if (!client) return;
+    state.clientId = client.id;
+    state.searchPick = client.id;
+    state.search = client.cod || client.nome;
+    $("q").value = state.search;
+    renderAll();
+    const row = document.querySelector("#rankBody tr.is-focus");
+    if (row) row.scrollIntoView({ behavior: reduceMotion() ? "auto" : "smooth", block: "center" });
     $("btnClear").hidden = !hasActiveFilters();
   });
 
