@@ -41,7 +41,13 @@
         </button>
       </nav>
 
-      <p class="side-foot" id="sideFoot">Nenhuma base carregada</p>
+      <div class="side-foot" id="sideFoot">
+        <p class="side-base" id="sideBase">Nenhuma base carregada</p>
+        <div class="side-filters" id="sideFilters" hidden>
+          <p>Filtros utilizados:</p>
+          <ul id="sideFilterList"></ul>
+        </div>
+      </div>
 
       <button type="button" class="side-file" id="btnFile">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M5 20h14"/></svg>
@@ -259,6 +265,7 @@
                 <button type="button" data-tab="idle" aria-pressed="false">Sem faturar</button>
                 <button type="button" data-tab="new" aria-pressed="false">Novos</button>
                 <button type="button" data-tab="replenish" aria-pressed="false">Sem saldo consignado</button>
+                <button type="button" data-tab="stock" aria-pressed="false">Saldo consignado</button>
               </div>
               <div class="alert-list" id="alertList"></div>
               <details class="how">
@@ -270,6 +277,7 @@
                   <li><b>Sem faturar</b> — a última venda foi há mais de 3 meses, contados até o último mês com movimento na base inteira. Ao lado do cliente aparece a quantidade de livros consignados. Quem ainda tem livros fica em vermelho, com alerta. Não depende do mês clicado.</li>
                   <li><b>Novos</b> — primeira venda em 2026 ou depois. Não têm faturamento em 2023, 2024 nem 2025. Não depende do mês clicado.</li>
                   <li><b>Sem saldo consignado</b> — faturamento caiu e o saldo consignado está abaixo de 100 livros. Entra livraria, distribuidor e quem já tem saldo. A queda pode ser falta de reposição.</li>
+                  <li><b>Saldo consignado</b> — todos os clientes do recorte, do maior saldo consignado para o menor.</li>
                 </ul>
               </details>
             </article>

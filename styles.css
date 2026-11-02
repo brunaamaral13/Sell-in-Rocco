@@ -56,6 +56,7 @@ h1, h2, p { margin: 0; }
   display: flex;
   flex-direction: column;
   padding: 22px 14px 0;
+  overflow: hidden;
   animation: slide .55s cubic-bezier(.2,.7,.2,1) both;
 }
 .brand {
@@ -82,11 +83,37 @@ h1, h2, p { margin: 0; }
 .nav button:hover { background: rgba(255,255,255,.12); }
 .nav button.is-active { background: rgba(255,255,255,.18); }
 .side-foot {
-  margin: 22px 10px 0;
+  margin: 18px 10px 8px;
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
   font-size: 12px;
   line-height: 1.45;
   color: rgba(255,255,255,.82);
 }
+.side-base { margin: 0; }
+.side-filters { margin-top: 14px; }
+.side-filters p {
+  margin: 0 0 6px;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 650;
+}
+.side-filters ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.side-filters li {
+  color: #fff;
+  font-size: 12.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+.side-filters li.is-empty { color: rgba(255,255,255,.72); }
 .side-file {
   margin-top: auto;
   display: flex; gap: 10px; align-items: center;

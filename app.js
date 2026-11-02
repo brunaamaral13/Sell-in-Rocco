@@ -502,6 +502,48 @@ function hasActiveFilters() {
   return DIMS.some((dim) => state.filters[dim.key].size) || state.filters.cliente.size > 0;
 }
 
+function activeFilterGroups() {
+  const groups = [];
+  for (const dim of DIMS) {
+    const values = [...state.filters[dim.key]];
+    if (values.length) groups.push({ label: dim.label, values });
+  }
+  const picked = [...state.filters.cliente];
+  if (picked.length) {
+    const names = picked.slice(0, 8).map((id) => {
+      const client = state.clients.find((item) => item.id === id);
+      return client ? client.nome : id;
+    });
+    if (picked.length > 8) names.push("+" + (picked.length - 8) + " clientes");
+    groups.push({ label: "Cliente", values: names });
+  }
+  if (state.period?.type === "month") groups.push({ label: "Período", values: [MONTHS[state.period.index]] });
+  if (state.period?.type === "quarter") groups.push({ label: "Período", values: [quarterMonths(state.period.index)] });
+  if (state.cohort) groups.push({ label: "Corte", values: [COHORTS[state.cohort]] });
+  if (state.clientId) {
+    const client = state.clients.find((item) => item.id === state.clientId);
+    if (client) groups.push({ label: "Foco", values: [client.nome] });
+  }
+  const query = state.search.trim();
+  if (query) groups.push({ label: "Busca", values: [query] });
+  return groups;
+}
+
+function renderSideFilters() {
+  const box = $("sideFilters");
+  const list = $("sideFilterList");
+  if (!state.meta) {
+    box.hidden = true;
+    list.innerHTML = "";
+    return;
+  }
+  const groups = activeFilterGroups();
+  box.hidden = false;
+  list.innerHTML = groups.length
+    ? groups.map((group) => `<li>${esc(group.label)}: ${esc(group.values.join(", "))}</li>`).join("")
+    : `<li class="is-empty">Nenhum</li>`;
+}
+
 function niceMax(value) {
   if (value <= 0) return 1;
   const exp = Math.pow(10, Math.floor(Math.log10(value)));
@@ -1374,6 +1416,8 @@ function renderInsights(win) {
     const tab = document.querySelector(`#alertTabs [data-tab="${key}"]`);
     if (tab) tab.setAttribute("aria-pressed", state.listTab === key ? "true" : "false");
   }
+  const stockTab = document.querySelector('#alertTabs [data-tab="stock"]');
+  if (stockTab) stockTab.setAttribute("aria-pressed", state.listTab === "stock" ? "true" : "false");
   return base;
 }
 
@@ -1385,14 +1429,16 @@ function renderAlerts(win, base) {
       up: isUp(met), down: isDown(met), low: isLow(met), idle: client.idle, new: client.novo,
       stuck: isStuck(client), replenish: isReplenish(client, met), met
     };
-    if (flags[state.listTab]) rows.push({ client, ...flags });
+    if (state.listTab === "stock" || flags[state.listTab]) rows.push({ client, ...flags });
   }
   rows.sort((a, b) => {
     if (state.listTab === "up") return b.met.delta - a.met.delta;
     if (state.listTab === "down" || state.listTab === "replenish") return a.met.delta - b.met.delta;
     if (state.listTab === "low") return a.met.avg - b.met.avg;
     if (state.listTab === "new") return b.met.cur - a.met.cur || (a.client.first || 0) - (b.client.first || 0);
-    if (state.listTab === "stuck") return b.client.saldo - a.client.saldo;
+    if (state.listTab === "stuck" || state.listTab === "stock") {
+      return b.client.saldo - a.client.saldo || a.client.nome.localeCompare(b.client.nome, "pt-BR");
+    }
     return (b.client.saldo - a.client.saldo) || ((b.client.idleGap || 0) - (a.client.idleGap || 0));
   });
   const shown = rows.slice(0, 80);
@@ -1402,11 +1448,11 @@ function renderAlerts(win, base) {
     if (state.listTab === "up" || state.listTab === "down") pill = `<span class="pill ${state.listTab}">${formatPct(row.met.pct)}</span>`;
     else if (state.listTab === "low") pill = `<span class="pill low">${formatCompact(row.met.avg)}/mês</span>`;
     else if (state.listTab === "new") pill = `<span class="pill new">desde ${esc(row.client.firstLabel)}</span>`;
-    else if (state.listTab === "stuck") pill = `<span class="pill stuck">${formatBooks(client.saldo)}</span>`;
+    else if (state.listTab === "stuck" || state.listTab === "stock") pill = `<span class="pill stuck">${formatConsigned(client.saldo)}</span>`;
     else if (state.listTab === "replenish") pill = `<span class="pill replenish">${client.saldo > 0.5 ? formatConsigned(client.saldo) : "sem livros consignados"}</span>`;
     else if (client.saldo > 0.5) pill = `<span class="pill idle-alert" title="Sem faturar e ainda com livros consignados">${ALERT_ICON}${row.client.idleGap} meses · ${formatConsigned(client.saldo)}</span>`;
     else pill = `<span class="pill idle">${row.client.idleGap} meses · ${formatConsigned(0)}</span>`;
-    const stockBit = state.listTab === "stuck" || state.listTab === "replenish" || state.listTab === "idle"
+    const stockBit = state.listTab === "stuck" || state.listTab === "stock" || state.listTab === "replenish" || state.listTab === "idle"
       ? ""
       : (client.saldo > 0.5 ? ` · ${formatConsigned(client.saldo)}` : "");
     return `<button type="button" class="alert-row${state.clientId === client.id ? " is-focus" : ""}" data-id="${esc(client.id)}" style="animation-delay:${Math.min(index, 12) * 25}ms">
@@ -1422,7 +1468,8 @@ function renderAlerts(win, base) {
   const how = {
     new: "Primeira venda em " + NEW_YEAR + " ou depois, sem faturamento antes disso. Valores de " + range + ".",
     stuck: "Sem faturar há mais de 3 meses e com " + STOCK_STUCK.toLocaleString("pt-BR") + " livros ou mais consignados. " + idleAnchor + ".",
-    replenish: "Faturamento caiu em " + range + " e o saldo consignado está abaixo de " + STOCK_LOW.toLocaleString("pt-BR") + " livros. Pode ser falta de reposição."
+    replenish: "Faturamento caiu em " + range + " e o saldo consignado está abaixo de " + STOCK_LOW.toLocaleString("pt-BR") + " livros. Pode ser falta de reposição.",
+    stock: "Clientes do recorte ordenados pelo saldo consignado, do maior para o menor."
   };
   $("howRange").textContent = how[state.listTab] || ("Intervalo: " + range + " contra " + (win.year - 1) + ". " + idleAnchor + ".");
 }
@@ -1703,6 +1750,7 @@ function renderAll() {
   $("subtitle").textContent = (inView === total ? total.toLocaleString("pt-BR") + " clientes" : inView.toLocaleString("pt-BR") + " de " + total.toLocaleString("pt-BR") + " clientes")
     + " · " + state.analysisYear + " · " + rangeLabel(win.m0, win.m1)
     + (client ? " · foco em " + client.nome : "");
+  renderSideFilters();
 }
 
 let clientMenuSig = "";
@@ -1841,14 +1889,19 @@ function showDash() {
   $("q").disabled = false;
   $("fileLabel").textContent = "Trocar CSV";
   $("fileMeta").textContent = state.fileName;
-  $("sideFoot").textContent = state.clients.length.toLocaleString("pt-BR")
+  $("sideBase").textContent = state.clients.length.toLocaleString("pt-BR")
     + " clientes · movimento até " + state.meta.anchorLabel;
+  renderSideFilters();
 }
 
 function showEmpty(message) {
   $("dash").hidden = true;
   $("empty").hidden = false;
   $("q").disabled = true;
+  $("sideBase").textContent = state.clients.length
+    ? state.clients.length.toLocaleString("pt-BR") + " clientes · movimento até " + state.meta.anchorLabel
+    : "Nenhuma base carregada";
+  renderSideFilters();
   if (message) {
     $("error").hidden = false;
     $("error").textContent = message;
@@ -2026,7 +2079,7 @@ function bind() {
     const button = event.target.closest("[data-tab]");
     if (!button) return;
     state.listTab = button.dataset.tab;
-    if (state.cohort) state.cohort = state.listTab;
+    if (state.cohort && COHORTS[state.listTab]) state.cohort = state.listTab;
     renderAll();
   });
 
