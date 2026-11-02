@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Rocco · Faturamento sell-in</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,560;9..144,650&family=Outfit:wght@360;460;560;650&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23b5191a'/%3E%3C/svg%3E">
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <img src="logo-rocco.png" alt="Editora Rocco" width="184" height="50">
+        <small>Sell-in</small>
+      </div>
+
+      <nav class="nav" aria-label="Seções">
+        <button type="button" data-goto="sec-visao" class="is-active">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 4h7v7H4zM13 4h7v4h-7zM13 10h7v10h-7zM4 13h7v7H4z"/></svg>
+          Visão geral
+        </button>
+        <button type="button" data-goto="sec-evo">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V5M4 19h16"/><path d="M7 15l4-5 3 3 5-7"/></svg>
+          Evolução
+        </button>
+        <button type="button" data-goto="sec-alertas">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4 3 19h18L12 4z"/><path d="M12 10v4M12 16.5v.5"/></svg>
+          Alertas
+        </button>
+        <button type="button" data-goto="sec-rank">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 20V10M12 20V4M17 20v-7"/></svg>
+          Ranking
+        </button>
+      </nav>
+
+      <p class="side-foot" id="sideFoot">Nenhuma base carregada</p>
+
+      <button type="button" class="side-file" id="btnFile">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 4v10"/><path d="m8 8 4-4 4 4"/><path d="M5 20h14"/></svg>
+        <span>
+          <strong id="fileLabel">Importar CSV</strong>
+          <small id="fileMeta">Mesmo formato do sell-in</small>
+        </span>
+      </button>
+      <input id="file" type="file" accept=".csv,text/csv" hidden>
+    </aside>
+
+    <main class="main">
+      <div class="main-inner">
+        <header class="top">
+          <div>
+            <h1>Faturamento sell-in</h1>
+            <p id="subtitle">Importe a base para analisar a carteira.</p>
+          </div>
+          <div class="top-tools">
+            <div class="year-switch" id="yearSwitch" role="group" aria-label="Ano em análise"></div>
+            <label class="search">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="6"/><path d="m16 16 4 4"/></svg>
+              <input id="q" type="search" placeholder="Buscar cliente, código ou CNPJ" autocomplete="off" disabled>
+            </label>
+          </div>
+        </header>
+
+        <section id="empty" class="empty">
+          <div class="drop" id="drop">
+            <div class="drop-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M12 16V6"/><path d="m8 9 4-4 4 4"/><path d="M5 19h14"/></svg>
+            </div>
+            <h2>Solte o CSV de faturamento</h2>
+            <p>Use o arquivo no formato de <b>Faturamento sell-in acumulado</b>: uma linha por cliente, com código, tipo, rede, UF, vendedor, CNPJ, saldo consignado e os meses em blocos de ano contra ano.</p>
+            <button type="button" class="btn" id="pick">Selecionar arquivo</button>
+            <p class="error" id="error" hidden></p>
+          </div>
+        </section>
+
+        <div id="dash" hidden>
+          <section id="sec-visao" data-section>
+            <div class="filters">
+              <div class="filter-bar" id="filterBar"></div>
+              <button type="button" class="text-btn" id="btnClear" hidden>Limpar recortes</button>
+            </div>
+            <p class="hint">A base entra inteira. Escolha vendedor, rede, tipo ou UF — ou clique num mês, numa fatia e num cliente para cruzar a análise.</p>
+            <div class="chips" id="chips" hidden></div>
+
+            <div class="kpis">
+              <article class="kpi kpi-amber">
+                <span id="kpiRevenueLabel">Faturamento</span>
+                <b id="kpiRevenue">—</b>
+                <small id="kpiRevenueSub"></small>
+              </article>
+              <article class="kpi kpi-green" id="kpiVarCard">
+                <span>Variação vs. ano anterior</span>
+                <b id="kpiVar">—</b>
+                <small id="kpiVarSub"></small>
+              </article>
+              <article class="kpi kpi-navy">
+                <span>Clientes ativos</span>
+                <b id="kpiActive">—</b>
+                <small id="kpiActiveSub">com venda no período</small>
+              </article>
+              <article class="kpi kpi-purple">
+                <span>Ticket médio mensal</span>
+                <b id="kpiTicket">—</b>
+                <small id="kpiTicketSub">por cliente ativo</small>
+              </article>
+            </div>
+
+            <div class="insights" id="insights">
+              <button type="button" class="insight insight-up" data-cohort="up">
+                <b id="n-up">0</b>
+                <span>Cresceram<small>acima do ano anterior</small></span>
+              </button>
+              <button type="button" class="insight insight-down" data-cohort="down">
+                <b id="n-down">0</b>
+                <span>Caíram<small>abaixo do ano anterior</small></span>
+              </button>
+              <button type="button" class="insight insight-low" data-cohort="low">
+                <b id="n-low">0</b>
+                <span>Abaixo de R$ 1.500<small>de média mensal</small></span>
+              </button>
+              <button type="button" class="insight insight-idle" data-cohort="idle">
+                <b id="n-idle">0</b>
+                <span>Sem faturar<small>há mais de 3 meses</small></span>
+              </button>
+              <button type="button" class="insight insight-new" data-cohort="new">
+                <b id="n-new">0</b>
+                <span>Novos<small>sem histórico antes de 2026</small></span>
+              </button>
+              <button type="button" class="insight insight-stuck" data-cohort="stuck">
+                <b id="n-stuck">0</b>
+                <span>Saldo consignado<small>sem vender e com 200+ livros</small></span>
+              </button>
+              <button type="button" class="insight insight-replenish" data-cohort="replenish">
+                <b id="n-replenish">0</b>
+                <span>Sem saldo consignado<small>caiu e tem pouco saldo</small></span>
+              </button>
+            </div>
+          </section>
+
+          <section class="grid-mid" id="sec-evo" data-section>
+            <article class="card chart-card">
+              <header class="card-head">
+                <div>
+                  <h2 id="chartTitle">Evolução mensal</h2>
+                  <p id="chartSub"></p>
+                </div>
+                <div class="seg" id="viewSeg" role="group" aria-label="Tipo de evolução">
+                  <button type="button" data-view="mensal" aria-pressed="true">Mensal</button>
+                  <button type="button" data-view="trimestral" aria-pressed="false">Trimestral</button>
+                  <button type="button" data-view="anual" aria-pressed="false">Anual</button>
+                  <button type="button" data-view="acumulada" aria-pressed="false">Acumulada</button>
+                </div>
+              </header>
+              <div class="legend" id="yearLegend"></div>
+              <div class="plot-wrap">
+                <canvas id="trend" aria-describedby="chartSummary"></canvas>
+              </div>
+              <p id="chartSummary" class="sr-only"></p>
+            </article>
+
+            <article class="card donut-card">
+              <header class="card-head">
+                <div>
+                  <h2>Composição</h2>
+                  <p id="donutSub">Participação no período</p>
+                </div>
+                <div class="seg seg-sm" id="dimSeg" role="group" aria-label="Dimensão">
+                  <button type="button" data-dim="tipo" aria-pressed="true">Tipo</button>
+                  <button type="button" data-dim="rede" aria-pressed="false">Rede</button>
+                  <button type="button" data-dim="uf" aria-pressed="false">UF</button>
+                  <button type="button" data-dim="vendedor" aria-pressed="false">Vendedor</button>
+                </div>
+              </header>
+              <div class="donut-layout">
+                <div class="donut-wrap">
+                  <canvas id="donut"></canvas>
+                  <div class="donut-center">
+                    <span id="donutCaption">Período</span>
+                    <strong id="donutTotal">—</strong>
+                  </div>
+                </div>
+                <div class="slice-list" id="donutLegend"></div>
+              </div>
+            </article>
+          </section>
+
+          <section class="grid-bot">
+            <article class="card" id="sec-alertas" data-section>
+              <header class="card-head">
+                <div>
+                  <h2>Quem merece atenção</h2>
+                  <p id="howRange"></p>
+                </div>
+              </header>
+              <div class="seg seg-wrap" id="alertTabs" role="tablist">
+                <button type="button" data-tab="up" aria-pressed="true">Cresceram</button>
+                <button type="button" data-tab="down" aria-pressed="false">Caíram</button>
+                <button type="button" data-tab="low" aria-pressed="false">Abaixo de R$ 1.500</button>
+                <button type="button" data-tab="idle" aria-pressed="false">Sem faturar</button>
+                <button type="button" data-tab="new" aria-pressed="false">Novos</button>
+                <button type="button" data-tab="stuck" aria-pressed="false">Saldo consignado</button>
+                <button type="button" data-tab="replenish" aria-pressed="false">Sem saldo consignado</button>
+              </div>
+              <div class="alert-list" id="alertList"></div>
+              <details class="how">
+                <summary>Como os alertas são calculados</summary>
+                <ul>
+                  <li><b>Cresceram</b> — faturamento do intervalo maior que o mesmo intervalo do ano anterior. Quem não tinha base no ano anterior entra aqui.</li>
+                  <li><b>Caíram</b> — faturamento menor, desde que o ano anterior tenha tido venda.</li>
+                  <li><b>Abaixo de R$ 1.500</b> — média mensal do intervalo abaixo de R$ 1.500, com alguma venda no intervalo.</li>
+                  <li><b>Sem faturar</b> — a última venda foi há mais de 3 meses, contados até o último mês com movimento na base inteira. Ao lado dos meses aparece o saldo consignado. Quem ainda tem livros fica em vermelho, com alerta. Não depende do mês clicado.</li>
+                  <li><b>Novos</b> — primeira venda em 2026 ou depois. Não têm faturamento em 2023, 2024 nem 2025. Não depende do mês clicado.</li>
+                  <li><b>Saldo consignado</b> — sem faturar há mais de 3 meses e com 200 livros ou mais consignados. Estoque alto parado não combina com cliente sem venda.</li>
+                  <li><b>Sem saldo consignado</b> — faturamento caiu e o saldo consignado está abaixo de 100 livros. Entra livraria, distribuidor e quem já tem saldo. A queda pode ser falta de reposição.</li>
+                </ul>
+              </details>
+            </article>
+
+            <article class="card" id="sec-rank" data-section>
+              <header class="card-head">
+                <div>
+                  <h2 id="rankTitle">Ranking de clientes</h2>
+                  <p id="rankCount"></p>
+                </div>
+                <label class="check">
+                  <input type="checkbox" id="hideZeros" checked>
+                  Ocultar zerados
+                </label>
+              </header>
+              <div class="rank-scroll">
+                <table class="rank-table">
+                  <thead>
+                    <tr>
+                      <th class="col-pos">#</th>
+                      <th><button type="button" data-sort="name">Cliente</button></th>
+                      <th class="col-vend">Vendedor</th>
+                      <th class="num"><button type="button" data-sort="revenue">Faturamento</button></th>
+                      <th class="num"><button type="button" data-sort="pct">Variação</button></th>
+                      <th class="num"><button type="button" data-sort="saldo">Saldo</button></th>
+                    </tr>
+                  </thead>
+                  <tbody id="rankBody"></tbody>
+                </table>
+              </div>
+            </article>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <aside class="drawer" id="drawer" aria-hidden="true">
+    <div class="drawer-card" id="drawerBody"></div>
+  </aside>
+  <div class="tooltip" id="tooltip" hidden></div>
+  <div class="loading" id="loading" hidden>
+    <div>
+      <div class="spinner" aria-hidden="true"></div>
+      <p id="loadingText">Lendo o faturamento…</p>
+    </div>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
