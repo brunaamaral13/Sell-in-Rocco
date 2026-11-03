@@ -542,6 +542,20 @@ function renderSideFilters() {
   list.innerHTML = groups.length
     ? groups.map((group) => `<li>${esc(group.label)}: ${esc(group.values.join(", "))}</li>`).join("")
     : `<li class="is-empty">Nenhum</li>`;
+  $("sideClear").hidden = groups.length === 0;
+}
+
+function clearFilters() {
+  for (const dim of DIMS) state.filters[dim.key].clear();
+  state.filters.cliente.clear();
+  state.period = null;
+  state.cohort = null;
+  state.clientId = null;
+  state.search = "";
+  state.searchPick = null;
+  $("q").value = "";
+  state.hiddenYears.clear();
+  renderAll();
 }
 
 function niceMax(value) {
@@ -784,14 +798,7 @@ function buildDonut(list, win) {
     .filter((slice) => dim === "vendedor" || slice.value > 0.5)
     .sort((a, b) => b.value - a.value);
   const limit = dim === "tipo" ? 16 : 8;
-  if (dim === "vendedor") {
-    const seen = new Set(slices.map((slice) => slice.key));
-    for (const [key] of (state.options && state.options.vendedor) || []) {
-      if (seen.has(key)) continue;
-      slices.push({ key, value: 0 });
-    }
-    slices.sort((a, b) => b.value - a.value);
-  } else if (dim === "rede") {
+  if (dim === "rede") {
     const shown = new Set(slices.slice(0, limit).map((slice) => slice.key));
     const head = slices.filter((slice) => shown.has(slice.key));
     for (const key of PINNED_REDES) {
@@ -2039,18 +2046,8 @@ function bind() {
     renderAll();
   }, true);
 
-  $("btnClear").addEventListener("click", () => {
-    for (const dim of DIMS) state.filters[dim.key].clear();
-    state.filters.cliente.clear();
-    state.period = null;
-    state.cohort = null;
-    state.clientId = null;
-    state.search = "";
-    state.searchPick = null;
-    $("q").value = "";
-    state.hiddenYears.clear();
-    renderAll();
-  });
+  $("btnClear").addEventListener("click", clearFilters);
+  $("sideClear").addEventListener("click", clearFilters);
 
   $("chips").addEventListener("click", (event) => {
     const button = event.target.closest("[data-chip]");
