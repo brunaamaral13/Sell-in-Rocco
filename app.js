@@ -1734,7 +1734,30 @@ function renderChips() {
   $("btnClear").hidden = !hasActiveFilters();
 }
 
+function syncDimMenus() {
+  const sig = [...state.filters.vendedor].sort().join(",");
+  if (sig === dimMenuSig) return;
+  dimMenuSig = sig;
+  for (const dim of DIMS) {
+    if (dim.key === "vendedor") continue;
+    const menu = document.querySelector(`.menu[data-dim="${dim.key}"]`);
+    if (!menu) continue;
+    const list = menu.querySelector(".menu-list");
+    const search = menu.querySelector("input[type=search]");
+    const q = norm(search ? search.value : "");
+    const values = valuesForDim(dim.key);
+    list.innerHTML = values.length
+      ? dimOptionsHtml(dim.key, values)
+      : `<p class="empty-row">Nada na carteira deste vendedor.</p>`;
+    if (!q) continue;
+    list.querySelectorAll(".opt").forEach((opt) => {
+      opt.hidden = !norm(opt.dataset.label).includes(q);
+    });
+  }
+}
+
 function syncFilterUI() {
+  syncDimMenus();
   syncClientMenu();
   document.querySelectorAll(".menu").forEach((menu) => {
     const dim = menu.dataset.dim;
@@ -1774,7 +1797,7 @@ function renderYears() {
 
 function renderAll() {
   if (!state.meta) return;
-  pruneClientFilter();
+  pruneScopedFilters();
   const win = windowOf();
   const kpiList = population({ win, focus: true });
   const trendList = population({ win, focus: true });
@@ -1799,6 +1822,7 @@ function renderAll() {
 }
 
 let clientMenuSig = "";
+let dimMenuSig = "";
 
 function portfolioClients() {
   return state.clients
@@ -1808,8 +1832,43 @@ function portfolioClients() {
 
 function clientOptionsHtml(clients) {
   return clients.map((client) =>
-    `<label class="opt" data-label="${esc(client.nome + " " + (client.cod || "") + " " + (client.cnpj || ""))}"><input type="checkbox" data-filter-dim="cliente" data-filter-value="${esc(client.id)}"><span>${esc(client.nome)}</span><em>${esc(client.cod || client.uf)}</em></label>`
+    `<label class="opt" data-label="${esc(client.nome + " " + (client.cod || "") + " " + (client.cnpj || ""))}"><input type="checkbox" data-filter-dim="cliente" data-filter-value="${esc(client.id)}"><span>${esc(client.nome)}</span></label>`
   ).join("");
+}
+
+function clientsForVendor() {
+  const vend = state.filters.vendedor;
+  if (!vend.size) return state.clients;
+  return state.clients.filter((client) => vend.has(client.vendedor));
+}
+
+function valuesForDim(dimKey) {
+  if (dimKey === "vendedor") {
+    return state.options.vendedor.map(([value]) => value);
+  }
+  const seen = new Set();
+  for (const client of clientsForVendor()) seen.add(client[dimKey]);
+  return [...seen].sort((a, b) => a.localeCompare(b, "pt-BR"));
+}
+
+function dimOptionsHtml(dimKey, values) {
+  return values.map((value) =>
+    `<label class="opt" data-label="${esc(value)}"><input type="checkbox" data-filter-dim="${dimKey}" data-filter-value="${esc(value)}"><span>${esc(value)}</span></label>`
+  ).join("");
+}
+
+function pruneScopedFilters() {
+  const pool = clientsForVendor();
+  for (const dim of DIMS) {
+    if (dim.key === "vendedor") continue;
+    const allowed = new Set();
+    for (const client of pool) allowed.add(client[dim.key]);
+    const set = state.filters[dim.key];
+    for (const value of [...set]) {
+      if (!allowed.has(value)) set.delete(value);
+    }
+  }
+  pruneClientFilter();
 }
 
 function pruneClientFilter() {
@@ -1858,15 +1917,14 @@ function buildFilters() {
   const bar = $("filterBar");
   const menus = [];
   for (const dim of DIMS) {
-    const options = state.options[dim.key].map(([value, count]) =>
-      `<label class="opt" data-label="${esc(value)}"><input type="checkbox" data-filter-dim="${dim.key}" data-filter-value="${esc(value)}"><span>${esc(value)}</span><em>${count}</em></label>`
-    ).join("");
+    const options = dimOptionsHtml(dim.key, valuesForDim(dim.key));
     menus.push(filterMenu(dim.key, dim.label, options));
     if (dim.key === "vendedor") {
       menus.push(filterMenu("cliente", "Cliente", clientOptionsHtml(portfolioClients()), "menu-client"));
     }
   }
-  clientMenuSig = [...state.filters.vendedor].sort().join("|");
+  clientMenuSig = DIMS.map((dim) => dim.key + ":" + [...state.filters[dim.key]].sort().join(",")).join("|");
+  dimMenuSig = [...state.filters.vendedor].sort().join(",");
   bar.innerHTML = menus.join("");
 
   bar.querySelectorAll(".menu-btn").forEach((button) => {
