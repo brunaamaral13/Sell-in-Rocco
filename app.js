@@ -43,7 +43,7 @@ const state = {
   analysisYear: null,
   hiddenYears: new Set(),
   clientId: null,
-  donutDim: "tipo",
+  donutDim: "rede",
   view: "mensal",
   ufSort: "desc",
   search: "",
