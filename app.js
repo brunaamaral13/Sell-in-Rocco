@@ -187,6 +187,7 @@ function parseWorkbook(text) {
   const colVend = colIndex(header, (n) => n.includes("vendedor") || n === "rca" || n.includes("representante"));
   const colCnpj = colIndex(header, (n) => n.includes("cnpj"));
   const colSaldo = colIndex(header, (n) => n.includes("saldo") && n.includes("consign"));
+  const colValor = colIndex(header, (n) => n.includes("valor") && n.includes("consign"));
   if (colNome < 0) throw new Error("Não encontrei a coluna CLIENTE.");
 
   const idCols = [colNome, colCod, colTipo, colRede, colUf, colVend, colCnpj].filter((i) => i >= 0);
@@ -261,12 +262,14 @@ function parseWorkbook(text) {
         vendedor: colVend >= 0 ? cleanDim(cells[colVend], "Sem vendedor") : "Sem vendedor",
         cnpj: colCnpj >= 0 ? (cells[colCnpj] || "").trim() : "",
         saldo: colSaldo >= 0 ? parseStock(cells[colSaldo]) : 0,
+        valor: colValor >= 0 ? parseMoney(cells[colValor]) : 0,
         series: {}
       };
       for (const year of years) client.series[year] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
       map.set(id, client);
-    } else if (colSaldo >= 0) {
-      client.saldo += parseStock(cells[colSaldo]);
+    } else {
+      if (colSaldo >= 0) client.saldo += parseStock(cells[colSaldo]);
+      if (colValor >= 0) client.valor += parseMoney(cells[colValor]);
     }
     for (const year of years) {
       const cols = slots[year];
@@ -325,7 +328,13 @@ function parseWorkbook(text) {
 
   return {
     clients,
-    meta: { years, lastMonth, maxYear, anchorLabel: MONTHS[Math.max(0, lastMonth[maxYear])] + "/" + maxYear },
+    meta: {
+      years,
+      lastMonth,
+      maxYear,
+      hasValor: colValor >= 0,
+      anchorLabel: MONTHS[Math.max(0, lastMonth[maxYear])] + "/" + maxYear
+    },
     options
   };
 }
@@ -461,6 +470,10 @@ function formatConsigned(n) {
   const abs = Math.abs(v).toLocaleString("pt-BR");
   const word = Math.abs(v) === 1 ? "livro consignado" : "livros consignados";
   return (v < 0 ? "-" : "") + abs + " " + word;
+}
+function formatCover(months) {
+  const text = months.toLocaleString("pt-BR", { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+  return text + (Math.abs(months - 1) < 0.05 ? " mês" : " meses");
 }
 function inDim(client, except) {
   for (const dim of DIMS) {
@@ -1397,6 +1410,21 @@ function renderKpis(win, list) {
     : "sem base em " + (win.year - 1);
   tween($("kpiActive"), active, (value) => Math.round(value).toLocaleString("pt-BR"));
   $("kpiActiveSub").textContent = "de " + list.length.toLocaleString("pt-BR") + " no recorte";
+  const valor = list.reduce((sum, client) => sum + (client.valor || 0), 0);
+  const monthly = months ? cur / months : 0;
+  if (!state.meta.hasValor) {
+    tweenMoney("kpiValor", null);
+    $("kpiValorSub").textContent = "coluna ausente na base";
+  } else {
+    tweenMoney("kpiValor", valor);
+    if (monthly > 0.5 && valor > 0.5) {
+      $("kpiValorSub").textContent = "equivale a " + formatCover(valor / monthly) + " de faturamento";
+    } else if (valor > 0.5) {
+      $("kpiValorSub").textContent = "sem faturamento no intervalo";
+    } else {
+      $("kpiValorSub").textContent = "sem valor no recorte";
+    }
+  }
   if (ticket == null) tweenMoney("kpiTicket", null);
   else tweenMoney("kpiTicket", ticket);
   $("kpiTicketSub").textContent = "média de " + months + (months > 1 ? " meses" : " mês");
@@ -1577,7 +1605,7 @@ function renderRanking(win) {
       + (client.idle && !stuck ? `<i class="tag tag-idle" title="Sem faturar há ${client.idleGap} meses">+3m</i>` : "");
     return `<tr data-id="${esc(client.id)}" class="${state.clientId === client.id ? "is-focus" : ""}">
       <td class="col-pos${medal}">${index + 1}</td>
-      <td><div class="cname"><span>${esc(client.nome)}</span>${tags}</div><div class="cmeta">${esc(client.tipo)} · ${esc(client.uf)}</div></td>
+      <td><div class="cname"><span>${esc(client.nome)}</span>${tags}</div><div class="cmeta">${esc(client.tipo)} · ${esc(client.uf)} · ${formatConsigned(client.saldo)}</div></td>
       <td class="col-vend">${esc(client.vendedor)}</td>
       <td class="num"><div class="rev"><span style="width:${width}%"></span></div><b>${formatFull(row.met.cur)}</b></td>
       <td class="num"><span class="var ${pctClass}">${formatPct(row.met.pct)}</span></td>
@@ -1623,6 +1651,15 @@ function renderDrawer(win) {
   if (stuck) stockNote = "Sem faturar há " + client.idleGap + " meses com saldo alto. Esse estoque não deveria ficar parado.";
   else if (replenish) stockNote = "O faturamento caiu e o saldo está baixo. Vale checar se deixou de repor o que vendeu.";
   else if (client.saldo < 0.5) stockNote = "Sem saldo consignado neste momento.";
+  const valor = client.valor || 0;
+  const cover = met.avg > 0.5 && valor > 0.5 ? valor / met.avg : null;
+  const coverNote = !state.meta.hasValor
+    ? ""
+    : cover != null
+      ? " Equivale a " + formatCover(cover) + " da média de faturamento (" + formatFull(met.avg) + "/mês)."
+      : valor > 0.5 && met.cur <= 0.5
+        ? " Sem faturamento neste intervalo para comparar com a média."
+        : "";
   const stockClass = stuck ? " is-stuck" : replenish ? " is-replenish" : "";
   const revClass = met.pct == null || met.pct > 0.05 ? " is-up" : met.pct < -0.05 ? " is-down" : "";
   const rows = MONTHS_SHORT.map((label, index) => {
@@ -1651,8 +1688,9 @@ function renderDrawer(win) {
       <p>${prev}: ${formatFull(met.prev)} · ${formatPct(met.pct)}</p>
     </div>
     <div class="stock-callout stock-quiet${stockClass}">
-      <span>${formatConsigned(client.saldo)}</span>
-      <p>${stockNote}</p>
+      <span>Valor líquido consignado</span>
+      <b class="stock-money">${state.meta.hasValor ? formatFull(valor) : "—"}</b>
+      <p>${formatConsigned(client.saldo)}. ${stockNote}${coverNote}</p>
     </div>
     <div class="badges">${badges.join("") || `<span class="pill">estável</span>`}</div>
     <svg class="spark" viewBox="0 0 360 72" aria-hidden="true">${points(old, "#7d92ab")}${points(cur, "#b5191a")}</svg>

@@ -85,7 +85,7 @@
               <svg viewBox="0 0 24 24"><path d="M12 16V6"/><path d="m8 9 4-4 4 4"/><path d="M5 19h14"/></svg>
             </div>
             <h2>Solte o CSV de faturamento</h2>
-            <p>Use o arquivo no formato de <b>Faturamento sell-in acumulado</b>: uma linha por cliente, com código, tipo, rede, UF, vendedor, CNPJ, saldo consignado e os meses em blocos de ano contra ano.</p>
+            <p>Use o arquivo no formato de <b>Faturamento sell-in acumulado</b>: uma linha por cliente, com código, tipo, rede, UF, vendedor, CNPJ, saldo consignado, valor líquido total consignado e os meses em blocos de ano contra ano.</p>
             <button type="button" class="btn" id="pick">Selecionar arquivo</button>
             <p class="error" id="error" hidden></p>
           </div>
@@ -115,6 +115,11 @@
                 <span>Clientes ativos</span>
                 <b id="kpiActive">—</b>
                 <small id="kpiActiveSub">com venda no período</small>
+              </article>
+              <article class="kpi kpi-teal">
+                <span>Valor líquido consignado</span>
+                <b id="kpiValor">—</b>
+                <small id="kpiValorSub">soma do recorte</small>
               </article>
               <article class="kpi kpi-purple">
                 <span>Ticket médio mensal</span>
